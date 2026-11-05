@@ -114,6 +114,8 @@ def _fechar(doc: DocProposto) -> DocProposto:
         doc.motivos.append("tipo não identificado")
 
     doc.confianca = round(conf, 3)
+    if doc.confianca < settings.LIMIAR_REVISAO and not doc.motivos:
+        doc.motivos.append(f"confiança {doc.confianca:.2f} abaixo do limiar de revisão ({settings.LIMIAR_REVISAO:.2f})")
     doc.revisao = doc.confianca < settings.LIMIAR_REVISAO or doc.tipo == DESCONHECIDO or bool(doc.motivos)
     return doc
 

@@ -2,41 +2,11 @@
 
     pytest -q
 """
-import os
-import subprocess
-import sys
-import tempfile
-
 import pymupdf
-import pytest
 
-BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-TMP = tempfile.mkdtemp(prefix="docfactory_test_")
-os.environ.update(DATABASE_URL=f"sqlite:///{TMP}/t.db", DATA_DIR=TMP, LLM_PROVIDER="nenhum", DPI_OCR="200")
+from app.pipeline.segmentar import PaginaInfo, segmentar
 
-from fastapi.testclient import TestClient  # noqa: E402
-
-from app import worker  # noqa: E402
-from app.main import app  # noqa: E402
-from app.pipeline.segmentar import PaginaInfo, segmentar  # noqa: E402
-
-
-@pytest.fixture(scope="module")
-def lote_pdf():
-    caminho = os.path.join(TMP, "lote.pdf")
-    subprocess.run([sys.executable, os.path.join(BASE, "scripts", "gerar_lote_teste.py"), caminho], check=True)
-    return caminho
-
-
-@pytest.fixture(scope="module")
-def processado(lote_pdf):
-    with TestClient(app) as c:
-        with open(lote_pdf, "rb") as f:
-            r = c.post("/lotes", files={"arquivo": ("lote.pdf", f, "application/pdf")})
-        assert r.status_code == 201, r.text
-        lote = r.json()
-        worker.rodar(uma_vez=True)
-        yield c, lote
+# fixtures lote_pdf e processado: tests/conftest.py
 
 
 def test_upload_duplicado(processado, lote_pdf):

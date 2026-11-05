@@ -17,6 +17,7 @@ from app.pipeline.classificar import (classificar_por_regras, combinar,
                                       sinais_de_inicio, texto_do_topo)
 from app.pipeline.montar import montar_pdf
 from app.pipeline.ocr import e_pagina_em_branco, ocr_png
+from app.pipeline.resumir import resumir_documento
 from app.pipeline.segmentar import PaginaInfo, segmentar
 from app.storage import get_storage, key_documento, key_pagina
 from app.tipos import DESCONHECIDO
@@ -143,6 +144,7 @@ def segmentar_e_montar(db: Session, lote: Lote) -> None:
         for p in pags:
             p.documento_id = doc.id
         gerar_arquivos(lote, doc, pags)
+        resumir_documento(lote, doc)
     db.commit()
 
 

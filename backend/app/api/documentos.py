@@ -1,15 +1,17 @@
-"""Documentos, fila de revisão humana e busca."""
+"""Documentos, fila de revisão humana, auditoria, resumo e busca."""
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 from sqlalchemy import func, literal_column, select, update
 from sqlalchemy.orm import Session
 
+from app.api.deps import UsuarioAtual, analista, revisor
 from app.db import E_POSTGRES, get_db
 from app.models import Documento, Pagina, Revisao
 from app.pipeline.orquestrador import gerar_arquivos
-from app.schemas import BuscaItem, DocumentoOut, RevisaoIn
+from app.pipeline.resumir import nome_prioridade, resumir_documento
+from app.schemas import BuscaItem, DocumentoOut, Prioridade, RevisaoIn, RevisaoOut
 from app.storage import get_storage
-from app.tipos import TIPOS, nome_tipo
+from app.tipos import PRIORIDADES, TIPOS, nome_tipo
 
 router = APIRouter(tags=["documentos"])
 
@@ -23,7 +25,7 @@ def doc_out(d: Documento) -> DocumentoOut:
 
 def _snapshot(d: Documento) -> dict:
     return {"tipo": d.tipo, "pagina_inicio": d.pagina_inicio, "pagina_fim": d.pagina_fim,
-            "status_revisao": d.status_revisao}
+            "status_revisao": d.status_revisao, "prioridade": nome_prioridade(d.prioridade)}
 
 
 def _paginas(db: Session, doc_id: str) -> list[Pagina]:
@@ -38,19 +40,43 @@ def _obter(db: Session, doc_id: str) -> Documento:
 
 
 @router.get("/tipos")
-def listar_tipos():
-    return [{"codigo": c, "nome": t["nome"]} for c, t in TIPOS.items()]
+def listar_tipos(_u: UsuarioAtual = Depends(analista)):
+    return [{"codigo": c, "nome": t["nome"], "prioridade": t.get("prioridade", "media"),
+             "campos": t.get("campos", [])} for c, t in TIPOS.items()]
+
+
+@router.get("/documentos", response_model=list[DocumentoOut])
+def listar_documentos(tipo: str | None = None, status_revisao: str | None = None,
+                      prioridade: Prioridade | None = None, lote_id: str | None = None,
+                      limite: int = 100, deslocamento: int = 0,
+                      db: Session = Depends(get_db), _u: UsuarioAtual = Depends(analista)):
+    """Lista documentos de todos os lotes, com filtros. Mais recentes primeiro."""
+    q = select(Documento)
+    if tipo:
+        q = q.where(Documento.tipo == tipo)
+    if status_revisao:
+        q = q.where(Documento.status_revisao == status_revisao)
+    if prioridade:
+        q = q.where(Documento.prioridade == PRIORIDADES[prioridade])
+    if lote_id:
+        q = q.where(Documento.lote_id == lote_id)
+    q = q.order_by(Documento.criado_em.desc(), Documento.ordem).offset(max(0, deslocamento)).limit(min(max(1, limite), 500))
+    return [doc_out(d) for d in db.scalars(q)]
 
 
 @router.get("/documentos/{doc_id}", response_model=DocumentoOut)
-def obter_documento(doc_id: str, db: Session = Depends(get_db)):
+def obter_documento(doc_id: str, db: Session = Depends(get_db), _u: UsuarioAtual = Depends(analista)):
     return doc_out(_obter(db, doc_id))
 
 
 @router.get("/documentos/{doc_id}/pdf")
-def baixar_pdf(doc_id: str, anonimizado: bool = True, db: Session = Depends(get_db)):
-    """Por padrão entrega a versão anonimizada (privacidade por padrão)."""
+def baixar_pdf(doc_id: str, anonimizado: bool = True, db: Session = Depends(get_db),
+               u: UsuarioAtual = Depends(analista)):
+    """Por padrão entrega a versão anonimizada (privacidade por padrão).
+    Com login ativo, o PDF original (sem tarjas) exige perfil revisor ou superior."""
     d = _obter(db, doc_id)
+    if not anonimizado and u.autenticado and u.perfil == "analista":
+        raise HTTPException(403, "O PDF original (com dados pessoais) exige perfil revisor ou superior")
     key = d.pdf_anon_key if anonimizado else d.pdf_key
     if not key:
         raise HTTPException(404, "PDF ainda não gerado")
@@ -59,19 +85,38 @@ def baixar_pdf(doc_id: str, anonimizado: bool = True, db: Session = Depends(get_
                     headers={"Content-Disposition": f'inline; filename="{nome}"'})
 
 
+@router.get("/documentos/{doc_id}/revisoes", response_model=list[RevisaoOut])
+def trilha_de_auditoria(doc_id: str, db: Session = Depends(get_db), _u: UsuarioAtual = Depends(analista)):
+    """Todas as decisões humanas sobre o documento, da mais antiga para a mais nova."""
+    _obter(db, doc_id)
+    return list(db.scalars(select(Revisao).where(Revisao.documento_id == doc_id).order_by(Revisao.em, Revisao.id)))
+
+
+@router.post("/documentos/{doc_id}/resumo", response_model=DocumentoOut)
+def gerar_resumo(doc_id: str, db: Session = Depends(get_db), _u: UsuarioAtual = Depends(revisor)):
+    """Gera o resumo de novo (ex.: depois de configurar o modelo, ou após uma correção)."""
+    d = _obter(db, doc_id)
+    resumir_documento(d.lote, d)
+    db.commit()
+    return doc_out(d)
+
+
 # ------------------------------------------------------------ revisão humana
 @router.get("/revisao/fila", response_model=list[DocumentoOut])
-def fila_de_revisao(lote_id: str | None = None, db: Session = Depends(get_db)):
+def fila_de_revisao(lote_id: str | None = None, db: Session = Depends(get_db), _u: UsuarioAtual = Depends(analista)):
+    """Pendentes: prioridade mais alta primeiro; dentro da mesma prioridade, menor confiança primeiro."""
     q = select(Documento).where(Documento.status_revisao == "pendente")
     if lote_id:
         q = q.where(Documento.lote_id == lote_id)
-    return [doc_out(d) for d in db.scalars(q.order_by(Documento.confianca.asc()).limit(200))]
+    q = q.order_by(Documento.prioridade.desc(), Documento.confianca.asc(), Documento.criado_em)
+    return [doc_out(d) for d in db.scalars(q.limit(200))]
 
 
 @router.post("/documentos/{doc_id}/revisao", response_model=list[DocumentoOut])
-def revisar(doc_id: str, r: RevisaoIn, db: Session = Depends(get_db)):
+def revisar(doc_id: str, r: RevisaoIn, db: Session = Depends(get_db), u: UsuarioAtual = Depends(revisor)):
     d = _obter(db, doc_id)
     lote = d.lote
+    usuario = u.login if u.autenticado else (r.usuario or "anonimo")
     antes = _snapshot(d)
     afetados = [d]
 
@@ -82,6 +127,12 @@ def revisar(doc_id: str, r: RevisaoIn, db: Session = Depends(get_db)):
         if r.tipo not in TIPOS:
             raise HTTPException(422, f"tipo deve ser um de {list(TIPOS)}")
         d.tipo, d.status_revisao = r.tipo, "revisado"
+        resumir_documento(lote, d)
+
+    elif r.acao == "alterar_prioridade":
+        if r.prioridade is None:
+            raise HTTPException(422, "informe prioridade: alta, media ou baixa")
+        d.prioridade, d.prioridade_motivo = PRIORIDADES[r.prioridade], f"definida manualmente por {usuario}"
 
     elif r.acao == "dividir":
         pags = _paginas(db, d.id)
@@ -102,6 +153,8 @@ def revisar(doc_id: str, r: RevisaoIn, db: Session = Depends(get_db)):
         d.status_revisao = "revisado"
         gerar_arquivos(lote, d, [p for p in pags if p.numero < r.pagina_corte])
         gerar_arquivos(lote, novo, [p for p in pags if p.numero >= r.pagina_corte])
+        resumir_documento(lote, d)
+        resumir_documento(lote, novo)
         afetados.append(novo)
 
     elif r.acao == "juntar_proximo":
@@ -110,7 +163,7 @@ def revisar(doc_id: str, r: RevisaoIn, db: Session = Depends(get_db)):
             raise HTTPException(422, "Não há documento seguinte para juntar")
         for p in _paginas(db, prox.id):
             p.documento_id = d.id
-        db.add(Revisao(documento_id=None, lote_id=lote.id, usuario=r.usuario, acao="removido_por_juncao",
+        db.add(Revisao(documento_id=None, lote_id=lote.id, usuario=usuario, acao="removido_por_juncao",
                        antes=_snapshot(prox) | {"id": prox.id}))
         db.delete(prox)
         db.flush()
@@ -118,8 +171,9 @@ def revisar(doc_id: str, r: RevisaoIn, db: Session = Depends(get_db)):
                    .values(ordem=Documento.ordem - 1))
         d.status_revisao = "revisado"
         gerar_arquivos(lote, d, _paginas(db, d.id))
+        resumir_documento(lote, d)
 
-    db.add(Revisao(documento_id=d.id, lote_id=lote.id, usuario=r.usuario, acao=r.acao,
+    db.add(Revisao(documento_id=d.id, lote_id=lote.id, usuario=usuario, acao=r.acao,
                    antes=antes, depois=_snapshot(d)))
     db.commit()
     return [doc_out(x) for x in afetados]
@@ -127,7 +181,7 @@ def revisar(doc_id: str, r: RevisaoIn, db: Session = Depends(get_db)):
 
 # ------------------------------------------------------------ busca (OCR pesquisável)
 @router.get("/busca", response_model=list[BuscaItem])
-def buscar(q: str, tipo: str | None = None, db: Session = Depends(get_db)):
+def buscar(q: str, tipo: str | None = None, db: Session = Depends(get_db), _u: UsuarioAtual = Depends(analista)):
     if len(q.strip()) < 2:
         raise HTTPException(422, "Busca muito curta")
     if E_POSTGRES:

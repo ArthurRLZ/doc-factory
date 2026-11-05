@@ -45,3 +45,31 @@ def get_db():
 def init_db():
     from app import models  # noqa: F401  (registra as tabelas)
     Base.metadata.create_all(engine)
+    migrar_colunas()
+
+
+def migrar_colunas() -> list[str]:
+    """Migração leve: adiciona as colunas novas que ainda não existem em tabelas antigas.
+
+    create_all() cria tabelas, mas não altera as que já existem. Aqui só ADICIONAMOS colunas
+    (nunca removemos nem mudamos tipo), então é seguro rodar a cada start.
+    """
+    from sqlalchemy import inspect, text
+
+    insp = inspect(engine)
+    adicionadas = []
+    with engine.begin() as conn:
+        for tabela in Base.metadata.sorted_tables:
+            if not insp.has_table(tabela.name):
+                continue
+            existentes = {c["name"] for c in insp.get_columns(tabela.name)}
+            for col in tabela.columns:
+                if col.name in existentes:
+                    continue
+                tipo = col.type.compile(dialect=engine.dialect)
+                ddl = f'ALTER TABLE {tabela.name} ADD COLUMN "{col.name}" {tipo}'
+                if col.server_default is not None:
+                    ddl += f" DEFAULT {col.server_default.arg}"
+                conn.execute(text(ddl))
+                adicionadas.append(f"{tabela.name}.{col.name}")
+    return adicionadas

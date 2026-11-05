@@ -51,12 +51,13 @@ def recuperar_travadas(db, tudo: bool = False) -> int:
 
 
 def reivindicar_pagina(db) -> Pagina | None:
-    q = (select(Pagina)
+    # lote de prioridade maior primeiro; dentro da mesma prioridade, ordem de chegada
+    q = (select(Pagina).join(Lote, Lote.id == Pagina.lote_id)
          .where(or_(Pagina.status == "pendente",
                     and_(Pagina.status == "erro", Pagina.tentativas < settings.MAX_TENTATIVAS)))
-         .order_by(Pagina.id).limit(1))
+         .order_by(Lote.prioridade.desc(), Pagina.id).limit(1))
     if E_POSTGRES:
-        q = q.with_for_update(skip_locked=True)
+        q = q.with_for_update(skip_locked=True, of=Pagina)
     p = db.scalars(q).first()
     if not p:
         db.rollback()

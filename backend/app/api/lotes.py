@@ -8,12 +8,14 @@ from fastapi.responses import Response
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
+from app.api.deps import UsuarioAtual, analista, revisor
 from app.config import settings
 from app.db import get_db
 from app.models import Lote, Pagina, novo_id
 from app.pipeline.rasterizar import contar_paginas
 from app.schemas import DocumentoOut, LoteOut, PaginaOut
 from app.storage import get_storage, key_original
+from app.tipos import PRIORIDADES
 from app.api.documentos import doc_out
 
 router = APIRouter(prefix="/lotes", tags=["lotes"])
@@ -32,7 +34,12 @@ def lote_out(db: Session, lote: Lote) -> LoteOut:
 
 
 @router.post("", response_model=LoteOut, status_code=201)
-async def criar_lote(arquivo: UploadFile = File(...), nome: str | None = Form(None), db: Session = Depends(get_db)):
+async def criar_lote(arquivo: UploadFile = File(...), nome: str | None = Form(None),
+                     prioridade: str = Form("media", description="alta | media | baixa — lotes de prioridade alta são processados primeiro"),
+                     db: Session = Depends(get_db), u: UsuarioAtual = Depends(analista)):
+    prioridade = (prioridade or "media").lower().replace("normal", "media")
+    if prioridade not in PRIORIDADES:
+        raise HTTPException(422, "prioridade deve ser alta, media ou baixa")
     ext = os.path.splitext(arquivo.filename or "")[1].lower()
     if ext not in settings.extensoes:
         raise HTTPException(415, f"Extensão {ext or '(nenhuma)'} não suportada. Use: {settings.EXTENSOES_PERMITIDAS}")
@@ -70,7 +77,8 @@ async def criar_lote(arquivo: UploadFile = File(...), nome: str | None = Form(No
 
     lote = Lote(id=lote_id, nome=nome or arquivo.filename or "lote", arquivo_key=key, hash_sha256=digest,
                 mime=MIMES.get(ext, "application/octet-stream"), tamanho_bytes=tamanho,
-                total_paginas=n, status="processando")
+                total_paginas=n, status="processando", prioridade=PRIORIDADES[prioridade],
+                enviado_por=u.login)
     db.add(lote)
     db.add_all(Pagina(lote_id=lote_id, numero=i) for i in range(n))   # fila de trabalho = as páginas
     db.commit()
@@ -78,7 +86,7 @@ async def criar_lote(arquivo: UploadFile = File(...), nome: str | None = Form(No
 
 
 @router.get("", response_model=list[LoteOut])
-def listar_lotes(db: Session = Depends(get_db)):
+def listar_lotes(db: Session = Depends(get_db), _u: UsuarioAtual = Depends(analista)):
     return [lote_out(db, l) for l in db.scalars(select(Lote).order_by(Lote.criado_em.desc()).limit(100))]
 
 
@@ -90,22 +98,22 @@ def _obter(db: Session, lote_id: str) -> Lote:
 
 
 @router.get("/{lote_id}", response_model=LoteOut)
-def obter_lote(lote_id: str, db: Session = Depends(get_db)):
+def obter_lote(lote_id: str, db: Session = Depends(get_db), _u: UsuarioAtual = Depends(analista)):
     return lote_out(db, _obter(db, lote_id))
 
 
 @router.get("/{lote_id}/paginas", response_model=list[PaginaOut])
-def paginas_do_lote(lote_id: str, db: Session = Depends(get_db)):
+def paginas_do_lote(lote_id: str, db: Session = Depends(get_db), _u: UsuarioAtual = Depends(analista)):
     return _obter(db, lote_id).paginas
 
 
 @router.get("/{lote_id}/documentos", response_model=list[DocumentoOut])
-def documentos_do_lote(lote_id: str, db: Session = Depends(get_db)):
+def documentos_do_lote(lote_id: str, db: Session = Depends(get_db), _u: UsuarioAtual = Depends(analista)):
     return [doc_out(d) for d in _obter(db, lote_id).documentos]
 
 
 @router.post("/{lote_id}/reprocessar", response_model=LoteOut)
-def reprocessar(lote_id: str, tudo: bool = False, db: Session = Depends(get_db)):
+def reprocessar(lote_id: str, tudo: bool = False, db: Session = Depends(get_db), _u: UsuarioAtual = Depends(revisor)):
     """Recoloca na fila as páginas que falharam (ou todas, com ?tudo=true)."""
     lote = _obter(db, lote_id)
     cond = [Pagina.lote_id == lote_id]
@@ -118,7 +126,10 @@ def reprocessar(lote_id: str, tudo: bool = False, db: Session = Depends(get_db))
 
 
 @router.get("/{lote_id}/paginas/{numero}/imagem")
-def imagem_pagina(lote_id: str, numero: int, thumb: bool = True, db: Session = Depends(get_db)):
+def imagem_pagina(lote_id: str, numero: int, thumb: bool = True, db: Session = Depends(get_db),
+                  u: UsuarioAtual = Depends(analista)):
+    if not thumb and u.autenticado and u.perfil == "analista":
+        raise HTTPException(403, "A imagem em alta resolução (sem tarjas) exige perfil revisor ou superior")
     p = db.scalar(select(Pagina).where(Pagina.lote_id == lote_id, Pagina.numero == numero))
     key = p and (p.thumb_key if thumb else p.imagem_key)
     if not key:

@@ -17,6 +17,12 @@ class Settings(BaseSettings):
     # --- Segurança -------------------------------------------------------
     API_KEY: str | None = None          # se definido, exige header X-API-Key
     CORS_ORIGINS: str = "*"             # separar por vírgula
+    # login com perfis (analista < revisor < admin). Desligado = API aberta (demo).
+    AUTH_ATIVO: bool = False
+    JWT_SEGREDO: str | None = None      # sem valor: gera um aleatório a cada start (tokens caem no restart)
+    JWT_EXPIRA_MIN: int = 480
+    ADMIN_USUARIO: str = "admin"        # criado no primeiro start se não houver usuários
+    ADMIN_SENHA: str | None = None      # sem valor: nenhum admin é criado automaticamente
     MAX_UPLOAD_MB: int = 2048
     EXTENSOES_PERMITIDAS: str = ".pdf,.tif,.tiff,.png,.jpg,.jpeg"
 
@@ -41,6 +47,10 @@ class Settings(BaseSettings):
     LLM_BASE_URL: str | None = None     # sobrescreve a URL padrão do provedor
     LLM_MULTIMODAL: bool = True         # envia a imagem (mascarada) junto do texto
     LLM_TIMEOUT: int = 60
+
+    # --- Resumo -------------------------------------------------------------
+    RESUMO_ATIVO: bool = True           # gera resumo de cada documento (modelo, ou simples sem modelo)
+    RESUMO_CHARS_POR_PARTE: int = 6000  # documento maior que isso é resumido em partes e depois consolidado
 
     # --- Worker -----------------------------------------------------------
     MAX_TENTATIVAS: int = 3

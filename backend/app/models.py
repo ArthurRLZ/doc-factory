@@ -35,6 +35,9 @@ class Lote(Base):
     # recebido → processando → segmentando → concluido | erro
     status: Mapped[str] = mapped_column(String(20), default="recebido", index=True)
     erro: Mapped[str | None] = mapped_column(Text)
+    # 1 baixa · 2 normal · 3 alta — o worker atende primeiro os lotes de prioridade maior
+    prioridade: Mapped[int] = mapped_column(Integer, default=2, server_default="2", index=True)
+    enviado_por: Mapped[str | None] = mapped_column(String(100))
     criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=agora)
     atualizado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=agora, onupdate=agora)
 
@@ -106,6 +109,14 @@ class Documento(Base):
     texto: Mapped[str | None] = mapped_column(Text)                  # texto anonimizado (busca)
     pdf_key: Mapped[str | None] = mapped_column(String(512))         # PDF pesquisável
     pdf_anon_key: Mapped[str | None] = mapped_column(String(512))    # PDF com tarjas reais
+
+    # resumo (feito só com o texto já anonimizado)
+    resumo: Mapped[str | None] = mapped_column(Text)
+    campos: Mapped[dict | None] = mapped_column(JSON)                # campos-chave extraídos por tipo
+    resumo_origem: Mapped[str | None] = mapped_column(String(20))    # modelo | simples
+    # prioridade na fila de revisão: 1 baixa · 2 média · 3 alta
+    prioridade: Mapped[int] = mapped_column(Integer, default=2, server_default="2", index=True)
+    prioridade_motivo: Mapped[str | None] = mapped_column(String(300))
     criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=agora)
 
     lote: Mapped[Lote] = relationship(back_populates="documentos")
@@ -133,3 +144,16 @@ class Revisao(Base):
     em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=agora)
 
     documento: Mapped[Documento | None] = relationship(back_populates="revisoes")
+
+
+class Usuario(Base):
+    """Login com perfis: analista (envia e consulta) < revisor (revisa) < admin (gerencia usuários)."""
+    __tablename__ = "usuarios"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    login: Mapped[str] = mapped_column(String(100), unique=True, index=True)
+    nome: Mapped[str] = mapped_column(String(200))
+    senha_hash: Mapped[str] = mapped_column(String(300))
+    perfil: Mapped[str] = mapped_column(String(20))       # analista | revisor | admin
+    ativo: Mapped[bool] = mapped_column(Boolean, default=True)
+    criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=agora)

@@ -15,7 +15,7 @@ cp .env.example .env                                    # WORKER_INLINE=true →
 uvicorn app.main:app --reload                           # http://localhost:8000/docs
 python scripts/gerar_lote_teste.py lote_teste.pdf       # lote falso de 11 páginas / 6 documentos
 curl -F arquivo=@lote_teste.pdf http://localhost:8000/lotes
-pytest -q                                               # 7 testes, inclui ponta a ponta
+pytest -q                                               # 23 testes, inclui ponta a ponta
 ```
 
 ## Rodar a stack completa
@@ -30,12 +30,15 @@ docker compose up --build --scale worker=3              # Postgres + MinIO (cons
 app/
   main.py              FastAPI, CORS, API key, /health, /metricas
   config.py            todas as configurações (env/.env)
-  db.py · models.py    Lote, Pagina, Documento, Revisao (+ índice GIN full-text pt no Postgres)
+  security.py          senhas (PBKDF2) e tokens JWT
+  db.py · models.py    Lote, Pagina, Documento, Revisao, Usuario (+ índice GIN full-text pt no Postgres)
+                       + migração leve: adiciona colunas novas em bancos antigos
   storage.py           LocalStorage | S3Storage (MinIO) — banco guarda só a chave
   tipos.py             ← TAXONOMIA: troquem pelos 5 tipos reais do desafio
   worker.py            fila por página, retomada após falha, SKIP LOCKED
   api/lotes.py         upload em streaming, progresso, páginas, miniaturas, reprocessar
-  api/documentos.py    documentos, PDF, fila de revisão, dividir/juntar, busca
+  api/documentos.py    documentos, PDF, resumo, fila de revisão, dividir/juntar, auditoria, busca
+  api/auth.py          login e usuários (perfis analista/revisor/admin)
   llm/                 interface + cliente OpenAI-compatível (OpenAI, Gemini, DeepSeek, Ollama…)
   pipeline/
     rasterizar.py      1. PyMuPDF → PNG 300 dpi por página (ou texto nativo se o PDF for digital)
@@ -44,6 +47,7 @@ app/
     classificar.py     3. regras (palavras + título no topo) + modelo → tipo + confiança
     segmentar.py       4. sinais de início/fim → documentos (função pura, testável)
     montar.py          5. PyMuPDF → PDF pesquisável (texto invisível) + PDF com redaction real
+    resumir.py         6. resumo (modelo, em partes se for grande; ou simples) + prioridade
     orquestrador.py       liga tudo, grava banco/storage
 scripts/gerar_lote_teste.py
 tests/test_pipeline.py
@@ -51,19 +55,56 @@ tests/test_pipeline.py
 
 ## Endpoints
 
-| Método | Rota | Para quê |
-|---|---|---|
-| POST | `/lotes` | upload (multipart `arquivo`); 409 se o mesmo arquivo (SHA-256) já foi enviado |
-| GET | `/lotes`, `/lotes/{id}` | lista / progresso (`paginas_processadas`, `progresso`) |
-| GET | `/lotes/{id}/paginas` | status, tipo, confiança e sinais de cada página |
-| GET | `/lotes/{id}/paginas/{n}/imagem?thumb=true` | miniatura para a tela de revisão |
-| GET | `/lotes/{id}/documentos` | documentos detectados |
-| POST | `/lotes/{id}/reprocessar[?tudo=true]` | recoloca páginas com falha na fila |
-| GET | `/documentos/{id}/pdf[?anonimizado=false]` | PDF pesquisável (anonimizado por padrão) |
-| GET | `/revisao/fila[?lote_id=]` | pendentes, menor confiança primeiro |
-| POST | `/documentos/{id}/revisao` | `aprovar` · `alterar_tipo` · `dividir` (`pagina_corte`) · `juntar_proximo` |
-| GET | `/busca?q=&tipo=` | full-text em português (stemming: "contrato" acha "contratada") |
-| GET | `/tipos`, `/metricas` | taxonomia; taxa de automação, confiança média, docs por tipo |
+| Método | Rota | Perfil mínimo* | Para quê |
+|---|---|---|---|
+| POST | `/lotes` | analista | upload (multipart `arquivo`, `prioridade` = alta/media/baixa); 409 se o mesmo arquivo (SHA-256) já foi enviado |
+| GET | `/lotes`, `/lotes/{id}` | analista | lista / progresso (`paginas_processadas`, `progresso`) |
+| GET | `/lotes/{id}/paginas` | analista | status, tipo, confiança e sinais de cada página |
+| GET | `/lotes/{id}/paginas/{n}/imagem?thumb=true` | analista | miniatura (`thumb=false`, imagem sem tarja: revisor) |
+| GET | `/lotes/{id}/documentos` | analista | documentos detectados, com resumo e prioridade |
+| POST | `/lotes/{id}/reprocessar[?tudo=true]` | revisor | recoloca páginas com falha (ou todas) na fila |
+| GET | `/documentos?tipo=&status_revisao=&prioridade=&lote_id=` | analista | documentos de todos os lotes, com filtros |
+| GET | `/documentos/{id}/pdf[?anonimizado=false]` | analista | PDF pesquisável, anonimizado por padrão (original: revisor) |
+| POST | `/documentos/{id}/resumo` | revisor | gera o resumo de novo |
+| GET | `/documentos/{id}/revisoes` | analista | trilha de auditoria (quem, quando, antes e depois) |
+| GET | `/revisao/fila[?lote_id=]` | analista | pendentes: prioridade mais alta primeiro, depois menor confiança |
+| POST | `/documentos/{id}/revisao` | revisor | `aprovar` · `alterar_tipo` · `alterar_prioridade` · `dividir` (`pagina_corte`) · `juntar_proximo` |
+| GET | `/busca?q=&tipo=` | analista | full-text em português (stemming: "contrato" acha "contratada") |
+| GET | `/tipos`, `/metricas` | analista | taxonomia; automação, confiança, docs por tipo e por prioridade |
+| POST | `/auth/login` · GET `/auth/eu` | — | login (JWT) · quem está logado |
+| GET/POST | `/usuarios` · POST `/usuarios/{id}/desativar` | admin | gestão de usuários |
+| GET | `/health` | — | API, Tesseract, idioma do OCR, modelo e login |
+
+\* Só vale com `AUTH_ATIVO=true`. Desligado (padrão, modo demo), a API fica aberta.
+
+## Resumo de cada documento
+
+Depois que o documento é montado (e de novo após dividir, juntar ou trocar o tipo):
+
+- **Com modelo configurado:** o modelo recebe **só o texto já anonimizado** e o tipo do documento, e
+  devolve um resumo de 2 a 3 frases, os campos-chave do tipo (definidos em `tipos.py`, ex.: contrato →
+  partes, objeto, valor, vigência, foro) e uma sugestão de prioridade com o motivo. Campo que não está
+  no texto volta `null`: o modelo é instruído a não inventar.
+- **Documento grande:** o texto é dividido em partes de `RESUMO_CHARS_POR_PARTE` caracteres; cada parte
+  é resumida e os resumos parciais são consolidados (repete até caber numa chamada).
+- **Sem modelo, ou se ele falhar:** resumo simples — tipo, nº de páginas, título, datas e valores
+  encontrados no texto. O campo `resumo_origem` diz de onde veio (`modelo` ou `simples`).
+
+## Prioridade
+
+- **Do lote** (no upload): lotes `alta` são processados primeiro pelos workers.
+- **Do documento** (fila de revisão): a maior entre a prioridade padrão do tipo (`tipos.py`), a
+  sugerida pelo modelo e, se o lote foi enviado como `alta`, a do lote. Tipo desconhecido = `alta`.
+  O revisor pode mudar com a ação `alterar_prioridade`; `prioridade_motivo` explica a origem.
+
+## Login e perfis
+
+`AUTH_ATIVO=true` liga o login com JWT. Perfis: **analista** (envia e consulta, só vê PDF anonimizado) <
+**revisor** (revisa, vê o original) < **admin** (gerencia usuários). No primeiro start, se não houver
+usuários, o admin é criado com `ADMIN_USUARIO`/`ADMIN_SENHA`. Nas revisões, o usuário gravado na
+auditoria vem do token. Defina `JWT_SEGREDO` em produção (sem ele, os tokens caem a cada restart).
+
+O banco é migrado automaticamente no start: colunas novas são adicionadas em tabelas antigas.
 
 ## Como a decisão é tomada
 
@@ -106,7 +147,8 @@ O documento vai para a fila de revisão se:
   e meçam acurácia de corte e de tipo.
 - A anonimização é feita por regex. Próximo passo: Presidio + spaCy pt para nomes e endereços.
 - Pré-processamento mínimo. Próximo passo: deskew e binarização adaptativa para scans ruins.
-- Autenticação por chave única. Em produção: OAuth2/JWT com perfis (analista, revisor, admin).
+- Login com perfis já existe (JWT). Próximo passo: SSO/OAuth2 da organização e expiração com refresh token.
+- Resumo e prioridade pelo modelo foram testados com respostas simuladas; validar com o provedor escolhido.
 - Correções humanas ficam em `revisoes` e podem virar dataset para um classificador treinado
   (LayoutLMv3/Donut), reduzindo custo de modelo.
 - **Licença:** o PyMuPDF é AGPL. Para uso comercial, usar a licença paga ou trocar por pypdfium2 + OCRmyPDF.

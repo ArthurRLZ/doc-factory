@@ -16,4 +16,5 @@ def obter_llm() -> ClassificadorLLM | None:
         raise RuntimeError(f"Modelo '{prov}' precisa de LLM_MODEL e LLM_BASE_URL (ou um provedor conhecido)")
     # DeepSeek pela API oficial só recebe texto
     multimodal = settings.LLM_MULTIMODAL and prov != "deepseek"
-    return ClienteOpenAICompat(base, settings.LLM_MODEL, settings.LLM_API_KEY, multimodal, settings.LLM_TIMEOUT)
+    return ClienteOpenAICompat(base, settings.LLM_MODEL, settings.LLM_API_KEY, multimodal, settings.LLM_TIMEOUT,
+                               chars_por_parte=settings.RESUMO_CHARS_POR_PARTE)
