@@ -1,0 +1,607 @@
+<title>Document Factory</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: prancheta de engenharia — diagrama em largura total com rolagem própria, texto em coluna de 1100px */
+:root {
+  --bg: #F2F4F5; --surface: #FFFFFF; --ink: #15212B; --muted: #5A6A77; --line: #C3CDD5;
+  --front: #E7EFFA; --front-s: #8DADD8;
+  --api: #EEEAF9; --api-s: #A496D9;
+  --worker: #E3F3EE; --worker-s: #74B8A6;
+  --ext: #F6ECF4; --ext-s: #C996C0;
+  --data: #F7EFE0; --data-s: #CDAE74;
+  --hi: #FCE7B8; --hi-s: #D99A1C;
+  --num: #1F6F5E; --num-ink: #FFFFFF;
+  --f-display: "IBM Plex Sans Condensed", "Arial Narrow", sans-serif;
+  --f-body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0E151B; --surface: #17212A; --ink: #E2E9EF; --muted: #95A5B2; --line: #2E3D49;
+  --front: #14243A; --front-s: #4C77AE; --api: #1F1B36; --api-s: #7C6FC4;
+  --worker: #112C26; --worker-s: #3F927C; --ext: #2B1A29; --ext-s: #A3639A;
+  --data: #2B2416; --data-s: #A28349; --hi: #3D2E0E; --hi-s: #E0A630;
+  --num: #3FA88E; --num-ink: #0E151B; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #0E151B; --surface: #17212A; --ink: #E2E9EF; --muted: #95A5B2; --line: #2E3D49;
+  --front: #14243A; --front-s: #4C77AE; --api: #1F1B36; --api-s: #7C6FC4;
+  --worker: #112C26; --worker-s: #3F927C; --ext: #2B1A29; --ext-s: #A3639A;
+  --data: #2B2416; --data-s: #A28349; --hi: #3D2E0E; --hi-s: #E0A630;
+  --num: #3FA88E; --num-ink: #0E151B; color-scheme: dark }
+
+body { background: var(--bg); color: var(--ink); font-family: var(--f-body); font-size: 15px; line-height: 1.55; }
+.wrap { max-width: 1100px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 40px 64px; }
+header .eyebrow { font-family: var(--f-mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+h1 { font-family: var(--f-display); font-weight: 700; font-size: clamp(30px, 5vw, 46px); line-height: 1.05; margin: 8px 0 12px; text-wrap: balance; }
+h2 { font-family: var(--f-display); font-weight: 600; font-size: 24px; margin: 0 0 6px; text-wrap: balance; }
+.lede { max-width: 68ch; color: var(--muted); margin: 0; }
+section { margin-top: 48px; }
+section > p.note { max-width: 70ch; color: var(--muted); margin: 0 0 16px; }
+
+.stack { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; padding: 0; list-style: none; }
+.stack li { font-family: var(--f-mono); font-size: 12.5px; border: 1px solid var(--line); background: var(--surface); padding: 4px 10px; border-radius: 6px; }
+
+.diagram-bar { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; margin-bottom: 10px; }
+.diagram-bar .hint { font-size: 13px; color: var(--muted); }
+button.toggle { font: 500 13px var(--f-body); color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 6px 12px; cursor: pointer; }
+button.toggle:hover { border-color: var(--muted); }
+button.toggle:focus-visible { outline: 2px solid var(--num); outline-offset: 2px; }
+.scroller { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+.scroller svg { display: block; }
+.scroller.fit svg { width: 100%; height: auto; }
+
+/* SVG */
+.arch .canvas { fill: var(--surface); }
+.arch .lane { stroke-width: 1.5; }
+.arch .lane-ghost { fill: none; stroke-width: 1; stroke-dasharray: 3 4; }
+.arch .l-front { fill: var(--front); stroke: var(--front-s); }
+.arch .l-api { fill: var(--api); stroke: var(--api-s); }
+.arch .l-worker { fill: var(--worker); stroke: var(--worker-s); }
+.arch .lane-ghost.l-worker { fill: none; }
+.arch .l-ext { fill: var(--ext); stroke: var(--ext-s); }
+.arch .l-data { fill: var(--data); stroke: var(--data-s); }
+.arch .box { fill: var(--surface); stroke: var(--line); stroke-width: 1; }
+.arch .box-hi { fill: var(--hi); stroke: var(--hi-s); stroke-width: 1.5; }
+.arch .tbl { fill: var(--surface); stroke: var(--line); }
+.arch .tbl-head { fill: var(--data); stroke: none; }
+.arch .chip { fill: var(--bg); stroke: var(--line); }
+.arch .num-bg { fill: var(--num); }
+.arch .divider { stroke: var(--worker-s); stroke-dasharray: 5 4; stroke-width: 1.2; }
+.arch .divider-bg { fill: var(--worker); }
+.arch .arrow { fill: none; stroke: var(--ink); stroke-width: 1.6; }
+.arch .arrow.small { stroke: var(--muted); stroke-width: 1.3; }
+.arch .arrow.dash { stroke-dasharray: 6 5; }
+.arch .ah { fill: var(--ink); }
+.arch .rel { stroke: var(--data-s); stroke-width: 2; }
+.arch text { fill: var(--ink); }
+.arch .t-head { font: 700 24px var(--f-display); }
+.arch .t-head-sub { font: 400 14px var(--f-body); fill: var(--muted); }
+.arch .t-lane { font: 600 13px var(--f-mono); letter-spacing: .1em; }
+.arch .t-sub { font: 400 12px var(--f-body); fill: var(--muted); }
+.arch .t-title { font: 600 14px var(--f-body); }
+.arch .t-body { font: 400 12.2px var(--f-body); }
+.arch .t-body.muted { fill: var(--muted); }
+.arch .t-mono { font: 400 12px var(--f-mono); }
+.arch .t-mono.sm { font-size: 11.2px; }
+.arch .t-tbl { font: 600 12px var(--f-mono); }
+.arch .t-chip { font: 500 11px var(--f-mono); fill: var(--muted); }
+.arch .t-num { font: 700 12px var(--f-mono); fill: var(--num-ink); }
+.arch .t-lbl { font: 500 11px var(--f-mono); fill: var(--muted); }
+.arch .t-leg { font: 400 12px var(--f-body); fill: var(--muted); }
+.arch .t-rel { font: 600 9.5px var(--f-mono); fill: var(--muted); }
+.arch .t-divider { font: 500 11.5px var(--f-mono); fill: var(--num); }
+
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 480px), 1fr)); gap: 20px; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 18px; min-width: 0; }
+.card h3 { font: 600 16px var(--f-body); margin: 0 0 4px; }
+.card p { font-size: 13.5px; color: var(--muted); margin: 0 0 12px; }
+.card .mm { overflow-x: auto; }
+pre.mermaid { background: transparent; margin: 0; }
+
+table.dec { width: 100%; border-collapse: collapse; font-size: 14px; }
+.tbl-wrap { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; }
+table.dec th, table.dec td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+table.dec th { font: 600 12px var(--f-mono); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+table.dec tr:last-child td { border-bottom: 0; }
+table.dec td.n { font-family: var(--f-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pill { display: inline-block; font: 500 12px var(--f-mono); padding: 1px 8px; border-radius: 99px; border: 1px solid var(--line); white-space: nowrap; }
+.pill.ok { background: var(--worker); border-color: var(--worker-s); }
+.pill.rev { background: var(--hi); border-color: var(--hi-s); }
+footer { margin-top: 48px; font-size: 13px; color: var(--muted); }
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+</style>
+<div class="wrap">
+<header>
+  <div class="eyebrow">Hack Garanhuns Tech 2026 · Desafio 3</div>
+  <h1>Document Factory</h1>
+  <p class="lede">Um lote escaneado com centenas de páginas entra. Saem documentos separados, classificados por tipo e pesquisáveis, com os dados pessoais tarjados. Tudo que a máquina não tem certeza vai para uma pessoa revisar.</p>
+  <ul class="stack">
+    <li>FastAPI</li><li>PyMuPDF</li><li>Tesseract · por</li><li>PostgreSQL 16</li><li>MinIO / S3</li><li>modelo via API OpenAI-compatível</li><li>Angular</li><li>Docker Compose</li>
+  </ul>
+</header>
+
+<section aria-labelledby="s-arq">
+  <div class="diagram-bar">
+    <div>
+      <h2 id="s-arq">Visão geral</h2>
+    </div>
+    <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+      <span class="hint">Role para os lados ou ajuste à tela</span>
+      <button class="toggle" id="btn-fit" type="button" aria-pressed="false">Ajustar à tela</button>
+    </div>
+  </div>
+  <div class="scroller" id="scroller">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1232" width="1600" height="1232" role="img" aria-labelledby="dg-title" class="arch" font-family="var(--f-body)">
+<title id="dg-title">Arquitetura do Document Factory: front-end, API, workers do pipeline, motores de OCR e modelo, PostgreSQL e object storage</title>
+<defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="ah"/></marker><marker id="ah-s" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="ah"/></marker></defs>
+<rect width="1600" height="1232" class="canvas"/>
+<text x="20" y="40" class="t-head">Document Factory</text>
+<text x="268" y="40" class="t-head-sub">arquitetura · Hack Garanhuns Tech 2026 · Desafio 3</text>
+<line x1="1010" y1="34" x2="1050" y2="34" class="arrow" marker-end="url(#ah)"/>
+<text x="1058" y="38" class="t-leg" text-anchor="start">chamada direta</text>
+<line x1="1170" y1="34" x2="1210" y2="34" class="arrow dash" marker-end="url(#ah)"/>
+<text x="1218" y="38" class="t-leg" text-anchor="start">assíncrono (fila no banco)</text>
+<rect x="1402" y="26" width="16" height="16" rx="4" class="box-hi"/>
+<text x="1424" y="38" class="t-leg" text-anchor="start">decisão humana</text>
+<rect x="20" y="70" width="270" height="740" rx="14" class="lane l-front"/>
+<text x="36" y="96" class="t-lane">FRONT-END</text>
+<text x="36" y="114" class="t-sub">Angular (ou React + Vite)</text>
+<rect x="36" y="124" width="238" height="82" rx="9" class="box"/>
+<text x="50" y="149" class="t-title">Upload de lote</text>
+<text x="50" y="171" class="t-body">arrastar PDF/TIFF de até 2 GB</text>
+<text x="50" y="188" class="t-body">progresso via GET /lotes/{id}</text>
+<rect x="36" y="218" width="238" height="98" rx="9" class="box"/>
+<text x="50" y="243" class="t-title">Visão do lote</text>
+<text x="50" y="265" class="t-body">miniaturas de todas as páginas</text>
+<text x="50" y="282" class="t-body">documentos agrupados por cor</text>
+<text x="50" y="299" class="t-body">confiança de cada corte</text>
+<rect x="36" y="328" width="238" height="116" rx="9" class="box-hi"/>
+<text x="50" y="353" class="t-title">Fila de revisão</text>
+<text x="50" y="375" class="t-body">menor confiança primeiro</text>
+<text x="50" y="392" class="t-body">motivo de cada pendência</text>
+<text x="50" y="409" class="t-body">aprovar · trocar tipo</text>
+<text x="50" y="426" class="t-body">dividir · juntar com o próximo</text>
+<rect x="36" y="456" width="238" height="82" rx="9" class="box"/>
+<text x="50" y="481" class="t-title">Busca</text>
+<text x="50" y="503" class="t-body">full-text no texto do OCR</text>
+<text x="50" y="520" class="t-body">filtro por tipo de documento</text>
+<rect x="36" y="550" width="238" height="82" rx="9" class="box"/>
+<text x="50" y="575" class="t-title">Métricas</text>
+<text x="50" y="597" class="t-body">taxa de automação</text>
+<text x="50" y="614" class="t-body">documentos por tipo e confiança</text>
+<rect x="36" y="644" width="238" height="72" rx="9" class="box"/>
+<text x="50" y="669" class="t-title">Visualizador de PDF</text>
+<text x="50" y="691" class="t-body">versão anonimizada por padrão</text>
+<rect x="36" y="728" width="238" height="72" rx="9" class="box"/>
+<text x="50" y="753" class="t-title">Login e perfis</text>
+<text x="50" y="775" class="t-body">analista · revisor · admin</text>
+<rect x="350" y="70" width="310" height="740" rx="14" class="lane l-api"/>
+<text x="366" y="96" class="t-lane">API</text>
+<text x="366" y="114" class="t-sub">FastAPI · uvicorn · Pydantic</text>
+<rect x="366" y="124" width="278" height="116" rx="9" class="box"/>
+<text x="380" y="149" class="t-title">Entrada segura</text>
+<text x="380" y="171" class="t-body">CORS · X-API-Key (→ JWT com perfis)</text>
+<text x="380" y="188" class="t-body">upload em streaming, blocos de 1 MB</text>
+<text x="380" y="205" class="t-body">SHA-256 → 409 se o lote é repetido</text>
+<text x="380" y="222" class="t-body">PyMuPDF valida e conta as páginas</text>
+<rect x="366" y="252" width="278" height="282" rx="9" class="box"/>
+<text x="380" y="277" class="t-title">Rotas</text>
+<rect x="585.0" y="262" width="49.0" height="20" rx="10" class="chip"/>
+<text x="609.5" y="276" class="t-chip" text-anchor="middle">/docs</text>
+<text x="380" y="299" class="t-mono">POST /lotes</text>
+<text x="380" y="320" class="t-mono">GET  /lotes · /lotes/{id}</text>
+<text x="380" y="341" class="t-mono">GET  /lotes/{id}/paginas</text>
+<text x="380" y="362" class="t-mono">GET  /lotes/{id}/paginas/{n}/imagem</text>
+<text x="380" y="383" class="t-mono">GET  /lotes/{id}/documentos</text>
+<text x="380" y="404" class="t-mono">POST /lotes/{id}/reprocessar</text>
+<text x="380" y="425" class="t-mono">GET  /documentos/{id}/pdf</text>
+<text x="380" y="446" class="t-mono">GET  /revisao/fila</text>
+<text x="380" y="467" class="t-mono">POST /documentos/{id}/revisao</text>
+<text x="380" y="488" class="t-mono">GET  /busca?q=&amp;tipo=</text>
+<text x="380" y="509" class="t-mono">GET  /metricas · /tipos</text>
+<rect x="366" y="546" width="278" height="98" rx="9" class="box"/>
+<text x="380" y="571" class="t-title">Enfileira, não processa</text>
+<text x="380" y="593" class="t-body">1 linha por página, status pendente</text>
+<text x="380" y="610" class="t-body">responde em milissegundos</text>
+<text x="380" y="627" class="t-body">a fila é o próprio banco (sem Redis)</text>
+<rect x="366" y="656" width="278" height="144" rx="9" class="box-hi"/>
+<text x="380" y="681" class="t-title">Revisão humana</text>
+<text x="380" y="703" class="t-body">aprovar → revisado</text>
+<text x="380" y="720" class="t-body">alterar_tipo → novo tipo</text>
+<text x="380" y="737" class="t-body">dividir → cria documento e refaz PDFs</text>
+<text x="380" y="754" class="t-body">juntar_proximo → une e refaz PDFs</text>
+<text x="380" y="771" class="t-body">tudo gravado em revisoes</text>
+<rect x="702" y="82" width="510" height="740" rx="14" class="lane-ghost l-worker"/>
+<rect x="696" y="76" width="510" height="740" rx="14" class="lane-ghost l-worker"/>
+<rect x="690" y="70" width="510" height="740" rx="14" class="lane l-worker"/>
+<text x="706" y="96" class="t-lane">WORKERS  ×N réplicas</text>
+<text x="706" y="114" class="t-sub">python -m app.worker · processa página por página</text>
+<rect x="706" y="124" width="478" height="68" rx="9" class="box"/>
+<text x="720" y="149" class="t-title">Pega a próxima página</text>
+<text x="720" y="171" class="t-body">SELECT … FOR UPDATE SKIP LOCKED · retenta 3× · travada há 2 min volta</text>
+<rect x="706" y="204" width="478" height="82" rx="9" class="box"/>
+<circle cx="730" cy="224" r="11" class="num-bg"/>
+<text x="730" y="228.5" class="t-num" text-anchor="middle">1</text>
+<text x="748" y="229" class="t-title">Rasterizar</text>
+<rect x="1111.8" y="214" width="62.199999999999996" height="20" rx="10" class="chip"/>
+<text x="1142.9" y="228" class="t-chip" text-anchor="middle">PyMuPDF</text>
+<text x="720" y="251" class="t-body">get_pixmap(dpi=300, cinza): uma página por vez na memória</text>
+<text x="720" y="268" class="t-body">PDF digital? get_text(&#x27;words&#x27;) e pula o OCR · miniatura</text>
+<rect x="706" y="298" width="478" height="82" rx="9" class="box"/>
+<circle cx="730" cy="318" r="11" class="num-bg"/>
+<text x="730" y="322.5" class="t-num" text-anchor="middle">2</text>
+<text x="748" y="323" class="t-title">OCR</text>
+<rect x="1059.0" y="308" width="115.0" height="20" rx="10" class="chip"/>
+<text x="1116.5" y="322" class="t-chip" text-anchor="middle">Tesseract · por</text>
+<text x="720" y="345" class="t-body">image_to_data → cada palavra com caixa e confiança 0–100</text>
+<text x="720" y="362" class="t-body">autocontraste · página vazia nem chama o OCR · timeout 90 s</text>
+<rect x="706" y="392" width="478" height="82" rx="9" class="box"/>
+<circle cx="730" cy="412" r="11" class="num-bg"/>
+<text x="730" y="416.5" class="t-num" text-anchor="middle">3</text>
+<text x="748" y="417" class="t-title">Anonimizar</text>
+<rect x="1131.6" y="402" width="42.4" height="20" rx="10" class="chip"/>
+<text x="1152.8" y="416" class="t-chip" text-anchor="middle">LGPD</text>
+<text x="720" y="439" class="t-body">regex CPF · CNPJ · RG · e-mail · telefone</text>
+<text x="720" y="456" class="t-body">texto mascarado no banco · imagem tarjada para o modelo</text>
+<rect x="706" y="486" width="478" height="98" rx="9" class="box"/>
+<circle cx="730" cy="506" r="11" class="num-bg"/>
+<text x="730" y="510.5" class="t-num" text-anchor="middle">4</text>
+<text x="748" y="511" class="t-title">Classificar a página</text>
+<rect x="1078.8" y="496" width="95.19999999999999" height="20" rx="10" class="chip"/>
+<text x="1126.4" y="510" class="t-chip" text-anchor="middle">regras + modelo</text>
+<text x="720" y="533" class="t-body">regras: palavra-chave +1 · título no topo +3</text>
+<text x="720" y="550" class="t-body">confiança &lt; 0,75 → consulta o modelo (ou sempre)</text>
+<text x="720" y="567" class="t-body">concordam: confiança sobe · discordam: vai p/ revisão</text>
+<line x1="706" y1="598" x2="1184" y2="598" class="divider"/>
+<rect x="749.0" y="588" width="392" height="20" rx="4" class="divider-bg"/>
+<text x="945.0" y="602" class="t-divider" text-anchor="middle">lote completo → um único worker segmenta e monta</text>
+<rect x="706" y="614" width="478" height="98" rx="9" class="box"/>
+<circle cx="730" cy="634" r="11" class="num-bg"/>
+<text x="730" y="638.5" class="t-num" text-anchor="middle">5</text>
+<text x="748" y="639" class="t-title">Segmentar o lote</text>
+<rect x="1085.4" y="624" width="88.6" height="20" rx="10" class="chip"/>
+<text x="1129.7" y="638" class="t-chip" text-anchor="middle">função pura</text>
+<text x="720" y="661" class="t-body">“1 de N” → início · “2 de N” → continuação · título → início</text>
+<text x="720" y="678" class="t-body">modelo diz início · tipo mudou · página em branco = separador</text>
+<text x="720" y="695" class="t-body">conf. = mín(tipo, cortes, OCR) · &lt; 0,80 → fila de revisão</text>
+<rect x="706" y="722" width="478" height="80" rx="9" class="box"/>
+<circle cx="730" cy="742" r="11" class="num-bg"/>
+<text x="730" y="746.5" class="t-num" text-anchor="middle">6</text>
+<text x="748" y="747" class="t-title">Montar um PDF por documento</text>
+<rect x="1111.8" y="732" width="62.199999999999996" height="20" rx="10" class="chip"/>
+<text x="1142.9" y="746" class="t-chip" text-anchor="middle">PyMuPDF</text>
+<text x="720" y="769" class="t-body">pesquisável: imagem + texto invisível (render_mode=3)</text>
+<text x="720" y="786" class="t-body">anonimizado: apply_redactions apaga texto e pixels</text>
+<path d="M730,192 V204" class="arrow small" marker-end="url(#ah)"/>
+<path d="M730,286 V298" class="arrow small" marker-end="url(#ah)"/>
+<path d="M730,380 V392" class="arrow small" marker-end="url(#ah)"/>
+<path d="M730,474 V486" class="arrow small" marker-end="url(#ah)"/>
+<path d="M730,584 V614" class="arrow small" marker-end="url(#ah)"/>
+<path d="M730,712 V722" class="arrow small" marker-end="url(#ah)"/>
+<rect x="1250" y="70" width="330" height="740" rx="14" class="lane l-ext"/>
+<text x="1266" y="96" class="t-lane">MOTORES EXTERNOS</text>
+<text x="1266" y="114" class="t-sub">trocáveis por variável de ambiente</text>
+<rect x="1266" y="124" width="298" height="98" rx="9" class="box"/>
+<text x="1280" y="149" class="t-title">Observabilidade</text>
+<text x="1280" y="171" class="t-body">log por página: tempo e erro</text>
+<text x="1280" y="188" class="t-body">/metricas: taxa de automação</text>
+<text x="1280" y="205" class="t-body">trilha de auditoria em revisoes</text>
+<rect x="1266" y="290" width="298" height="98" rx="9" class="box"/>
+<text x="1280" y="315" class="t-title">Tesseract 5</text>
+<rect x="1505.0" y="300" width="49.0" height="20" rx="10" class="chip"/>
+<text x="1529.5" y="314" class="t-chip" text-anchor="middle">local</text>
+<text x="1280" y="337" class="t-body">idioma por · psm 3 · 300 dpi</text>
+<text x="1280" y="354" class="t-body">roda local, sem custo por página</text>
+<text x="1280" y="371" class="t-body">1 thread por worker (OMP_THREAD_LIMIT)</text>
+<rect x="1266" y="466" width="298" height="116" rx="9" class="box"/>
+<text x="1280" y="491" class="t-title">Gateway de modelos</text>
+<text x="1280" y="513" class="t-body">interface ClassificadorLLM</text>
+<text x="1280" y="530" class="t-body">1 cliente compatível com OpenAI</text>
+<text x="1280" y="547" class="t-body">JSON: tipo · início · confiança</text>
+<text x="1280" y="564" class="t-body">falhou? segue só com as regras</text>
+<rect x="1266" y="606" width="298" height="98" rx="9" class="box"/>
+<text x="1280" y="631" class="t-title">Nuvem</text>
+<rect x="1511.6" y="616" width="42.4" height="20" rx="10" class="chip"/>
+<text x="1532.8" y="630" class="t-chip" text-anchor="middle">.env</text>
+<text x="1280" y="653" class="t-body">Gemini Flash · GPT-4.1-mini</text>
+<text x="1280" y="670" class="t-body">DeepSeek (só texto)</text>
+<text x="1280" y="687" class="t-body">recebe apenas dado mascarado</text>
+<rect x="1266" y="716" width="298" height="86" rx="9" class="box"/>
+<text x="1280" y="741" class="t-title">Local, privacidade total</text>
+<rect x="1498.4" y="726" width="55.599999999999994" height="20" rx="10" class="chip"/>
+<text x="1526.2" y="740" class="t-chip" text-anchor="middle">Ollama</text>
+<text x="1280" y="763" class="t-body">Ollama: Qwen-VL · Gemma 3 · Llama Vision</text>
+<text x="1280" y="780" class="t-body">nenhum dado sai da máquina</text>
+<path d="M1356,582 V606" class="arrow small" marker-end="url(#ah)"/>
+<path d="M1564,560 H1572 V758 H1565" class="arrow small" marker-end="url(#ah)"/>
+<path d="M274,164 H366" class="arrow" marker-end="url(#ah)"/>
+<text x="320.0" y="156" class="t-lbl" text-anchor="middle">upload</text>
+<path d="M274,392 H366" class="arrow" marker-end="url(#ah)" marker-start="url(#ah-s)"/>
+<text x="320.0" y="384" class="t-lbl" text-anchor="middle">JSON</text>
+<path d="M366,680 H274" class="arrow" marker-end="url(#ah)"/>
+<text x="320.0" y="672" class="t-lbl" text-anchor="middle">PDF</text>
+<path d="M366,754 H274" class="arrow" marker-end="url(#ah)" marker-start="url(#ah-s)"/>
+<text x="320.0" y="746" class="t-lbl" text-anchor="middle">ações</text>
+<path d="M644,594 H675 V158 H706" class="arrow dash" marker-end="url(#ah)"/>
+<text x="0" y="0" class="t-lbl" text-anchor="middle" transform="translate(670 380) rotate(-90)">fila = tabela paginas</text>
+<path d="M1184,339 H1266" class="arrow" marker-end="url(#ah)" marker-start="url(#ah-s)"/>
+<text x="1225.0" y="331" class="t-lbl" text-anchor="middle">PNG</text>
+<path d="M1184,527 H1266" class="arrow" marker-end="url(#ah)" marker-start="url(#ah-s)"/>
+<text x="1225.0" y="519" class="t-lbl" text-anchor="middle">sem PII</text>
+<rect x="20" y="850" width="1560" height="366" rx="14" class="lane l-data"/>
+<text x="36" y="876" class="t-lane">DADOS</text>
+<text x="36" y="894" class="t-sub">o banco guarda metadados; arquivos ficam no object storage</text>
+<rect x="36" y="906" width="964" height="294" rx="9" class="box"/>
+<text x="50" y="931" class="t-title">PostgreSQL 16</text>
+<text x="168" y="931" class="t-sub">SQLite no dev · mesma modelagem via SQLAlchemy</text>
+<rect x="52" y="954" width="204" height="182" rx="7" class="tbl"/>
+<path d="M52 961 a7 7 0 0 1 7 -7 H249 a7 7 0 0 1 7 7 V980 H52 Z" class="tbl-head"/>
+<text x="62" y="972" class="t-tbl">lotes</text>
+<text x="62" y="998" class="t-mono sm">id  PK</text>
+<text x="62" y="1016" class="t-mono sm">nome</text>
+<text x="62" y="1034" class="t-mono sm">hash_sha256  UNIQUE</text>
+<text x="62" y="1052" class="t-mono sm">arquivo_key → storage</text>
+<text x="62" y="1070" class="t-mono sm">mime · tamanho_bytes</text>
+<text x="62" y="1088" class="t-mono sm">total_paginas</text>
+<text x="62" y="1106" class="t-mono sm">status</text>
+<text x="62" y="1124" class="t-mono sm">criado_em</text>
+<rect x="272" y="954" width="254" height="236" rx="7" class="tbl"/>
+<path d="M272 961 a7 7 0 0 1 7 -7 H519 a7 7 0 0 1 7 7 V980 H272 Z" class="tbl-head"/>
+<text x="282" y="972" class="t-tbl">paginas</text>
+<text x="282" y="998" class="t-mono sm">id  PK · lote_id  FK</text>
+<text x="282" y="1016" class="t-mono sm">numero  (único no lote)</text>
+<text x="282" y="1034" class="t-mono sm">status · tentativas · erro</text>
+<text x="282" y="1052" class="t-mono sm">imagem_key · thumb_key</text>
+<text x="282" y="1070" class="t-mono sm">palavras_key</text>
+<text x="282" y="1088" class="t-mono sm">texto  (já mascarado)</text>
+<text x="282" y="1106" class="t-mono sm">ocr_confianca · em_branco</text>
+<text x="282" y="1124" class="t-mono sm">tipo_regra · tipo_llm</text>
+<text x="282" y="1142" class="t-mono sm">tipo · confianca</text>
+<text x="282" y="1160" class="t-mono sm">sinais  JSON</text>
+<text x="282" y="1178" class="t-mono sm">documento_id  FK</text>
+<rect x="542" y="954" width="248" height="182" rx="7" class="tbl"/>
+<path d="M542 961 a7 7 0 0 1 7 -7 H783 a7 7 0 0 1 7 7 V980 H542 Z" class="tbl-head"/>
+<text x="552" y="972" class="t-tbl">documentos</text>
+<text x="552" y="998" class="t-mono sm">id  PK · lote_id  FK</text>
+<text x="552" y="1016" class="t-mono sm">ordem · tipo</text>
+<text x="552" y="1034" class="t-mono sm">pagina_inicio · pagina_fim</text>
+<text x="552" y="1052" class="t-mono sm">confianca</text>
+<text x="552" y="1070" class="t-mono sm">status_revisao</text>
+<text x="552" y="1088" class="t-mono sm">motivos  JSON</text>
+<text x="552" y="1106" class="t-mono sm">pdf_key · pdf_anon_key</text>
+<text x="552" y="1124" class="t-mono sm">texto → índice GIN (pt)</text>
+<rect x="806" y="954" width="180" height="146" rx="7" class="tbl"/>
+<path d="M806 961 a7 7 0 0 1 7 -7 H979 a7 7 0 0 1 7 7 V980 H806 Z" class="tbl-head"/>
+<text x="816" y="972" class="t-tbl">revisoes</text>
+<text x="816" y="998" class="t-mono sm">id · documento_id</text>
+<text x="816" y="1016" class="t-mono sm">usuario</text>
+<text x="816" y="1034" class="t-mono sm">acao</text>
+<text x="816" y="1052" class="t-mono sm">antes  JSON</text>
+<text x="816" y="1070" class="t-mono sm">depois  JSON</text>
+<text x="816" y="1088" class="t-mono sm">em</text>
+<line x1="256" y1="967" x2="272" y2="967" class="rel"/>
+<text x="264.0" y="948" class="t-rel" text-anchor="middle">1:N</text>
+<line x1="526" y1="967" x2="542" y2="967" class="rel"/>
+<text x="534.0" y="948" class="t-rel" text-anchor="middle">1:N</text>
+<line x1="790" y1="967" x2="806" y2="967" class="rel"/>
+<text x="798.0" y="948" class="t-rel" text-anchor="middle">1:N</text>
+<rect x="1020" y="906" width="544" height="294" rx="9" class="box"/>
+<text x="1034" y="931" class="t-title">Object storage</text>
+<text x="1156" y="931" class="t-sub">MinIO (S3) · pasta local no dev</text>
+<text x="1036" y="962" class="t-mono">lotes/{lote_id}/</text>
+<text x="1054" y="984" class="t-mono">original.pdf</text>
+<text x="1320" y="984" class="t-body muted">← enviado pelo usuário</text>
+<text x="1054" y="1006" class="t-mono">paginas/00012.png</text>
+<text x="1320" y="1006" class="t-body muted">← 300 dpi, entrada do OCR</text>
+<text x="1054" y="1028" class="t-mono">paginas/00012.thumb.jpg</text>
+<text x="1320" y="1028" class="t-body muted">← miniatura do front</text>
+<text x="1054" y="1050" class="t-mono">paginas/00012.palavras.json</text>
+<text x="1320" y="1050" class="t-body muted">← caixas + confiança</text>
+<text x="1054" y="1072" class="t-mono">documentos/{doc_id}.pdf</text>
+<text x="1320" y="1072" class="t-body muted">← PDF pesquisável</text>
+<text x="1054" y="1094" class="t-mono">documentos/{doc_id}.anon.pdf</text>
+<text x="1320" y="1094" class="t-body muted">← PDF com tarjas</text>
+<line x1="1036" y1="1112" x2="1548" y2="1112" class="divider"/>
+<text x="1036" y="1132" class="t-body">banco guarda só a chave e o hash, nunca BLOB</text>
+<text x="1036" y="1150" class="t-body">MinIO → S3/GCS: muda 4 variáveis, zero código</text>
+<path d="M505,810 V906" class="arrow" marker-end="url(#ah)"/>
+<text x="497" y="838" class="t-lbl" text-anchor="end">INSERT lote + páginas</text>
+<path d="M610,810 V830 H850 a10,10 0 0 1 20,0 H1080 V906" class="arrow" marker-end="url(#ah)"/>
+<text x="960" y="850" class="t-lbl" text-anchor="middle">original.pdf</text>
+<path d="M860,810 V906" class="arrow" marker-end="url(#ah)" marker-start="url(#ah-s)"/>
+<text x="868" y="880" class="t-lbl" text-anchor="start">status · resultados</text>
+<path d="M1150,810 V906" class="arrow" marker-end="url(#ah)" marker-start="url(#ah-s)"/>
+<text x="1158" y="880" class="t-lbl" text-anchor="start">PNG · JSON · PDFs</text>
+</svg>
+  </div>
+</section>
+
+<section aria-labelledby="s-seq">
+  <h2 id="s-seq">Do upload à revisão</h2>
+  <p class="note">A API só recebe o arquivo e cria uma linha por página no banco. Quem faz o trabalho pesado são os workers, que pegam uma página de cada vez. Por isso dá para matar um worker no meio do lote e ele retoma de onde parou.</p>
+  <div class="card"><div class="mm">
+<pre class="mermaid">
+sequenceDiagram
+  autonumber
+  actor A as Analista
+  participant F as Front
+  participant API as API FastAPI
+  participant DB as PostgreSQL
+  participant S3 as MinIO
+  participant W as Worker
+  participant T as Tesseract
+  participant L as Modelo
+  A->>F: arrasta lote.pdf
+  F->>API: POST /lotes (multipart)
+  API->>API: SHA-256 e PyMuPDF conta as páginas
+  API->>S3: original.pdf
+  API->>DB: INSERT lote e N páginas (pendente)
+  API-->>F: 201 id, total_paginas
+  loop cada página, N workers em paralelo
+    W->>DB: SKIP LOCKED, status processando
+    W->>S3: lê o original, grava PNG e miniatura
+    W->>T: image_to_data (por)
+    T-->>W: palavras, caixas e confiança
+    opt regras com confiança abaixo de 0,75
+      W->>L: texto mascarado e imagem tarjada
+      L-->>W: tipo, inicio_documento, confianca
+    end
+    W->>DB: página ok
+  end
+  W->>DB: lote processando para segmentando (só 1 worker)
+  W->>S3: PDF pesquisável e PDF anonimizado
+  W->>DB: documentos e status_revisao
+  F->>API: GET /lotes/id (polling)
+  API-->>F: concluido
+  A->>F: abre a fila de revisão
+  F->>API: POST /documentos/id/revisao
+  API->>S3: refaz os PDFs afetados
+  API->>DB: grava em revisoes
+</pre>
+  </div></div>
+</section>
+
+<section aria-labelledby="s-corte">
+  <h2 id="s-corte">Como o sistema decide onde um documento termina</h2>
+  <p class="note">O sistema avalia cada página contra os sinais abaixo, do mais forte para o mais fraco, e para no primeiro que se aplica. A confiança do documento é a menor entre a confiança do tipo, a de cada corte e a qualidade do OCR.</p>
+  <div class="tbl-wrap">
+  <table class="dec">
+    <thead><tr><th>Sinal na página</th><th>Decisão</th><th>Confiança do corte</th></tr></thead>
+    <tbody>
+      <tr><td>Página em branco</td><td>separador: fecha o documento atual</td><td class="n">—</td></tr>
+      <tr><td>Primeira do lote ou logo após um separador</td><td>início</td><td class="n">0,95 com título · 0,85 sem</td></tr>
+      <tr><td>“Página 2 de 3”, “fl. 2/3”</td><td>continuação</td><td class="n">0,97 · <span class="pill rev">0,60 se título ou modelo dizem início</span></td></tr>
+      <tr><td>“Página 1 de N”</td><td>início</td><td class="n">0,97</td></tr>
+      <tr><td>Título do tipo no topo (30% superior)</td><td>início</td><td class="n">0,90 · <span class="pill rev">0,60 se o modelo diz continuação</span></td></tr>
+      <tr><td>Só o modelo diz que é início</td><td>início</td><td class="n">0,75</td></tr>
+      <tr><td>Tipo mudou, com confiança ≥ 0,6</td><td>início</td><td class="n"><span class="pill rev">0,65</span></td></tr>
+      <tr><td>Mesmo tipo do documento atual</td><td>continuação</td><td class="n">0,90</td></tr>
+      <tr><td>Tipo desconhecido</td><td>continuação</td><td class="n">0,80</td></tr>
+      <tr><td>Tipo diferente com confiança baixa</td><td>continuação</td><td class="n"><span class="pill rev">0,60</span></td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p class="note" style="margin-top:14px">Vai para a fila de revisão quando a confiança fica abaixo de 0,80, o tipo é desconhecido, regras e modelo discordam, a contagem “1 de N” não bate com o número de páginas encontradas ou alguma página falhou. Os outros documentos ficam como <span class="pill ok">auto_aprovado</span>.</p>
+</section>
+
+<section aria-labelledby="s-estados">
+  <h2 id="s-estados">Estados e retomada após falha</h2>
+  <p class="note">Cada página tem um status no banco. Um worker que morre deixa a página como “processando”. Depois de 2 minutos ela volta para a fila, e reprocessar a mesma página não duplica nada.</p>
+  <div class="grid2">
+    <div class="card"><h3>Página</h3><p>Unidade de trabalho do worker</p><div class="mm">
+<pre class="mermaid">
+stateDiagram-v2
+  [*] --> pendente: upload
+  pendente --> processando: worker pega
+  processando --> ok
+  processando --> erro: exceção ou timeout do OCR
+  erro --> processando: tentativas abaixo de 3
+  erro --> falhou: 3ª falha
+  processando --> pendente: worker morreu há mais de 2 min
+  falhou --> pendente: POST reprocessar
+  ok --> [*]
+</pre></div></div>
+    <div class="card"><h3>Lote</h3><p>Só um worker consegue mudar de processando para segmentando</p><div class="mm">
+<pre class="mermaid">
+stateDiagram-v2
+  [*] --> processando: upload aceito
+  processando --> segmentando: nenhuma página em aberto
+  segmentando --> concluido
+  segmentando --> erro
+  segmentando --> processando: travou há mais de 2 min
+  concluido --> processando: reprocessar
+  erro --> processando: reprocessar
+</pre></div></div>
+    <div class="card"><h3>Documento</h3><p>Fila de revisão humana</p><div class="mm">
+<pre class="mermaid">
+stateDiagram-v2
+  [*] --> auto_aprovado: confiança ≥ 0,80, sem alertas
+  [*] --> pendente: abaixo de 0,80 ou com alerta
+  pendente --> revisado: aprovar, alterar tipo, dividir, juntar
+  auto_aprovado --> revisado: correção manual
+</pre></div></div>
+    <div class="card"><h3>Privacidade</h3><p>O dado pessoal é mascarado antes de sair do servidor</p><div class="mm">
+<pre class="mermaid">
+flowchart LR
+  P[Página escaneada] --> O[OCR local<br/>Tesseract]
+  O --> R{Regex<br/>CPF · CNPJ · RG<br/>e-mail · telefone}
+  R -->|texto mascarado| DB[(Banco)]
+  R -->|imagem com tarja| L[modelo na nuvem]
+  R -->|caixas das palavras| PDF[PDF anonimizado<br/>apply_redactions]
+  P -.->|original| S[(Storage privado)]
+</pre></div></div>
+  </div>
+</section>
+
+<section aria-labelledby="s-er">
+  <h2 id="s-er">Modelo de dados</h2>
+  <p class="note">O banco guarda metadados e a chave de cada arquivo. As imagens, as caixas das palavras e os PDFs ficam no object storage.</p>
+  <div class="card"><div class="mm">
+<pre class="mermaid">
+erDiagram
+  LOTES ||--o{ PAGINAS : contem
+  LOTES ||--o{ DOCUMENTOS : gera
+  DOCUMENTOS ||--o{ PAGINAS : agrupa
+  DOCUMENTOS ||--o{ REVISOES : registra
+  LOTES {
+    string id PK
+    string hash_sha256 UK
+    string arquivo_key
+    int total_paginas
+    string status
+  }
+  PAGINAS {
+    int id PK
+    string lote_id FK
+    int numero
+    string status
+    int tentativas
+    string imagem_key
+    string palavras_key
+    text texto "mascarado"
+    float ocr_confianca
+    string tipo
+    float confianca
+    json sinais
+    string documento_id FK
+  }
+  DOCUMENTOS {
+    string id PK
+    string lote_id FK
+    int ordem
+    string tipo
+    int pagina_inicio
+    int pagina_fim
+    float confianca
+    string status_revisao
+    json motivos
+    string pdf_key
+    string pdf_anon_key
+    text texto "indice GIN pt"
+  }
+  REVISOES {
+    int id PK
+    string documento_id FK
+    string usuario
+    string acao
+    json antes
+    json depois
+  }
+</pre>
+  </div></div>
+</section>
+
+<footer>Esqueleto de referência. Os limiares foram calibrados num lote sintético: recalibrem com os dados de teste da organização.</footer>
+</div>
+
+<script>
+(function () {
+  var b = document.getElementById('btn-fit'), s = document.getElementById('scroller');
+  b.addEventListener('click', function () {
+    var on = s.classList.toggle('fit');
+    b.setAttribute('aria-pressed', on ? 'true' : 'false');
+    b.textContent = on ? 'Tamanho real' : 'Ajustar à tela';
+  });
+})();
+</script>

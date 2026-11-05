@@ -1,0 +1,135 @@
+"""Modelo de dados.
+
+Regra de ouro: o banco guarda METADADOS. Imagens, PDFs e caixas de palavras
+ficam no storage (disco/MinIO/S3) e o banco guarda só a chave (key) + hash.
+"""
+import uuid
+from datetime import datetime, timezone
+
+from sqlalchemy import (DDL, JSON, Boolean, DateTime, Float, ForeignKey, Index,
+                        Integer, String, Text, event)
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from app.db import Base
+
+
+def agora():
+    return datetime.now(timezone.utc)
+
+
+def novo_id():
+    return uuid.uuid4().hex
+
+
+class Lote(Base):
+    """Um arquivo enviado (PDF/TIFF com centenas de páginas)."""
+    __tablename__ = "lotes"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=novo_id)
+    nome: Mapped[str] = mapped_column(String(255))
+    arquivo_key: Mapped[str] = mapped_column(String(512))          # chave no storage
+    hash_sha256: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    mime: Mapped[str] = mapped_column(String(100))
+    tamanho_bytes: Mapped[int] = mapped_column(Integer)
+    total_paginas: Mapped[int] = mapped_column(Integer, default=0)
+    # recebido → processando → segmentando → concluido | erro
+    status: Mapped[str] = mapped_column(String(20), default="recebido", index=True)
+    erro: Mapped[str | None] = mapped_column(Text)
+    criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=agora)
+    atualizado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=agora, onupdate=agora)
+
+    paginas: Mapped[list["Pagina"]] = relationship(back_populates="lote", cascade="all, delete-orphan",
+                                                   order_by="Pagina.numero")
+    documentos: Mapped[list["Documento"]] = relationship(back_populates="lote", cascade="all, delete-orphan",
+                                                         order_by="Documento.ordem")
+
+
+class Pagina(Base):
+    """Unidade de trabalho do worker. Cada página é processada de forma idempotente."""
+    __tablename__ = "paginas"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    lote_id: Mapped[str] = mapped_column(ForeignKey("lotes.id", ondelete="CASCADE"), index=True)
+    numero: Mapped[int] = mapped_column(Integer)                     # 0-based dentro do lote
+    documento_id: Mapped[str | None] = mapped_column(ForeignKey("documentos.id", ondelete="SET NULL"), index=True)
+
+    # pendente → processando → ok | erro (retenta) → falhou (desistiu)
+    status: Mapped[str] = mapped_column(String(20), default="pendente", index=True)
+    tentativas: Mapped[int] = mapped_column(Integer, default=0)
+    erro: Mapped[str | None] = mapped_column(Text)
+
+    # artefatos no storage
+    imagem_key: Mapped[str | None] = mapped_column(String(512))       # PNG 300 dpi (para OCR)
+    thumb_key: Mapped[str | None] = mapped_column(String(512))        # JPG pequeno (front)
+    palavras_key: Mapped[str | None] = mapped_column(String(512))     # JSON com caixas das palavras
+    largura_pt: Mapped[float | None] = mapped_column(Float)
+    altura_pt: Mapped[float | None] = mapped_column(Float)
+
+    # OCR
+    nativa: Mapped[bool] = mapped_column(Boolean, default=False)     # PDF digital (sem OCR)
+    texto: Mapped[str | None] = mapped_column(Text)                  # texto já ANONIMIZADO
+    ocr_confianca: Mapped[float | None] = mapped_column(Float)       # 0-100 (Tesseract)
+    em_branco: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    # classificação
+    tipo_regra: Mapped[str | None] = mapped_column(String(50))
+    conf_regra: Mapped[float | None] = mapped_column(Float)
+    tipo_llm: Mapped[str | None] = mapped_column(String(50))
+    conf_llm: Mapped[float | None] = mapped_column(Float)
+    inicio_llm: Mapped[bool | None] = mapped_column(Boolean)
+    tipo: Mapped[str | None] = mapped_column(String(50))             # decisão combinada
+    confianca: Mapped[float | None] = mapped_column(Float)
+    divergente: Mapped[bool] = mapped_column(Boolean, default=False)
+    sinais: Mapped[dict | None] = mapped_column(JSON)                # pagina_x, pagina_n, titulo_topo...
+
+    atualizado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=agora, onupdate=agora)
+
+    lote: Mapped[Lote] = relationship(back_populates="paginas")
+
+    __table_args__ = (Index("ix_paginas_lote_numero", "lote_id", "numero", unique=True),)
+
+
+class Documento(Base):
+    """Documento lógico detectado dentro do lote (intervalo de páginas)."""
+    __tablename__ = "documentos"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=novo_id)
+    lote_id: Mapped[str] = mapped_column(ForeignKey("lotes.id", ondelete="CASCADE"), index=True)
+    ordem: Mapped[int] = mapped_column(Integer)
+    tipo: Mapped[str] = mapped_column(String(50), index=True)
+    pagina_inicio: Mapped[int] = mapped_column(Integer)
+    pagina_fim: Mapped[int] = mapped_column(Integer)
+    confianca: Mapped[float] = mapped_column(Float)
+    # auto_aprovado | pendente | revisado
+    status_revisao: Mapped[str] = mapped_column(String(20), index=True)
+    motivos: Mapped[list | None] = mapped_column(JSON)
+    texto: Mapped[str | None] = mapped_column(Text)                  # texto anonimizado (busca)
+    pdf_key: Mapped[str | None] = mapped_column(String(512))         # PDF pesquisável
+    pdf_anon_key: Mapped[str | None] = mapped_column(String(512))    # PDF com tarjas reais
+    criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=agora)
+
+    lote: Mapped[Lote] = relationship(back_populates="documentos")
+    revisoes: Mapped[list["Revisao"]] = relationship(back_populates="documento", cascade="all, delete-orphan")
+
+
+# Busca full-text em português com índice GIN (só no PostgreSQL; no SQLite cai para LIKE)
+event.listen(Documento.__table__, "after_create", DDL(
+    "CREATE INDEX IF NOT EXISTS ix_documentos_fts ON documentos "
+    "USING gin (to_tsvector('portuguese', coalesce(texto, '')))"
+).execute_if(dialect="postgresql"))
+
+
+class Revisao(Base):
+    """Trilha de auditoria de cada decisão humana (vira dado de treino depois)."""
+    __tablename__ = "revisoes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    documento_id: Mapped[str | None] = mapped_column(ForeignKey("documentos.id", ondelete="SET NULL"), index=True)
+    lote_id: Mapped[str] = mapped_column(String(32), index=True)
+    usuario: Mapped[str] = mapped_column(String(100))
+    acao: Mapped[str] = mapped_column(String(30))     # aprovar | alterar_tipo | dividir | juntar_proximo
+    antes: Mapped[dict | None] = mapped_column(JSON)
+    depois: Mapped[dict | None] = mapped_column(JSON)
+    em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=agora)
+
+    documento: Mapped[Documento | None] = relationship(back_populates="revisoes")
