@@ -13,14 +13,29 @@ Conteúdo (11 páginas → 6 documentos esperados):
 Todos os nomes e números são inventados.
 """
 import io
+import os
 import random
 import sys
 
 import pymupdf
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
-FONTE = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
-FONTE_B = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+
+def _primeira_fonte(*caminhos: str) -> str:
+    """Primeira fonte que existir (Linux → Windows → Mac)."""
+    for c in caminhos:
+        if os.path.exists(c):
+            return c
+    raise FileNotFoundError(f"nenhuma fonte encontrada: {caminhos}")
+
+
+_WIN = os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "Fonts")
+FONTE = _primeira_fonte("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+                        os.path.join(_WIN, "arial.ttf"),
+                        "/System/Library/Fonts/Supplemental/Arial.ttf")
+FONTE_B = _primeira_fonte("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+                          os.path.join(_WIN, "arialbd.ttf"),
+                          "/System/Library/Fonts/Supplemental/Arial Bold.ttf")
 W, H = 1240, 1754  # A4 @150 dpi
 
 PAGINAS = [
