@@ -42,3 +42,7 @@ class ClassificadorLLM(Protocol):
     def interpretar_regras_separacao(self, texto: str, tipos: dict[str, str]) -> list[dict] | None:
         """(opcional) Frase em português → regras de separação; None em falha."""
         ...
+
+    def extrair_funcao(self, texto: str, funcoes: dict[str, str]) -> dict | None:
+        """(opcional) {"funcao", "chave", "evidencia"} do documento trabalhista; None em falha."""
+        ...

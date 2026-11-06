@@ -62,7 +62,8 @@ class Settings(BaseSettings):
     LLM_MULTIMODAL: bool = True         # envia a imagem (mascarada) junto do texto
     LLM_TIMEOUT: int = 60
     LLM_CUSTO_POR_CHAMADA_BRL: float = 0.0  # custo médio por chamada de IA, só para estimativa na tela (0 = não mostrar R$)
-    FRAUDE_ATENCAO_REVISAO: bool = True     # documento com risco "atencao" também vai para a fila de revisão
+    FRAUDE_ATENCAO_REVISAO: bool = True
+    FUNCAO_EXIGENCIAS_ATIVO: bool = True    # a função lida no ASO/CTPS acrescenta as NRs exigidas ao checklist     # documento com risco "atencao" também vai para a fila de revisão
 
     # --- Validade -----------------------------------------------------------
     VALIDADE_ALERTA_DIAS: int = 30      # vence em até N dias → status "vencendo" (e prioridade alta)

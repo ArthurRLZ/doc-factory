@@ -7,6 +7,7 @@ NOVAS = [
     "lotes.llm_paginas", "lotes.gabarito", "lotes.regras_aplicadas",
     "paginas.llm_chamado",
     "documentos.decidido_por", "documentos.ia_justificativa", "documentos.regras_aplicadas",
+    "trabalhadores.funcao", "trabalhadores.funcao_chave", "trabalhadores.funcao_origem", "trabalhadores.funcao_evidencia",
 ]
 
 

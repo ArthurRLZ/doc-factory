@@ -84,6 +84,7 @@ app.include_router(automacao.router_aprendizados, dependencies=protegido)
 app.include_router(lotes.router, dependencies=protegido)
 app.include_router(documentos.router, dependencies=protegido)
 app.include_router(trabalhadores.router, dependencies=protegido)
+app.include_router(trabalhadores.router_funcoes, dependencies=protegido)
 app.include_router(regras.router, dependencies=protegido)
 
 

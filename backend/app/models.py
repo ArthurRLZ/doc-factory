@@ -195,6 +195,11 @@ class Trabalhador(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     cpf_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     cpf_mascarado: Mapped[str] = mapped_column(String(20))           # ***.982.247-**
+    # função/cargo lido nos documentos (F3): define NRs exigidas no checklist
+    funcao: Mapped[str | None] = mapped_column(String(120))           # como está escrito no documento
+    funcao_chave: Mapped[str | None] = mapped_column(String(40))      # chave de FUNCOES_NR, ou None
+    funcao_origem: Mapped[str | None] = mapped_column(String(20))     # texto | ia | manual
+    funcao_evidencia: Mapped[str | None] = mapped_column(String(300))
     criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=agora)
 
     documentos: Mapped[list[Documento]] = relationship(back_populates="trabalhador")

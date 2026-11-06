@@ -5,6 +5,7 @@
 As datas são RELATIVAS A HOJE, para a demo continuar coerente em qualquer dia:
   - documentos vencidos, vencendo em menos de 30 dias e vigentes
   - 2 trabalhadores com CPFs diferentes; o trabalhador B está SEM ficha de EPI (checklist acusa)
+  - funções: A = Auxiliar administrativo; B = Eletricista (a função exige NR-10 e NR-35: falta o NR-35)
 Conteúdo (14 páginas → 12 documentos esperados):
    1     ASO trabalhador A (exame há 13 meses → vencido pela regra de 12 meses)
    2     Ficha de EPI trabalhador A
@@ -51,7 +52,7 @@ PAGINAS = [
     ("ATESTADO DE SAÚDE OCUPACIONAL - ASO", [
         f"Empresa: {EMPRESA}",
         f"Nome: {A[0]}   CPF {A[1]}",
-        "Função: Eletricista de manutenção",
+        "Função: Auxiliar administrativo",
         "Exame: PERIÓDICO",
         "Riscos ocupacionais: eletricidade, ruído",
         f"Data do exame: {meses_atras(13)}",
@@ -94,7 +95,7 @@ PAGINAS = [
     ("ATESTADO DE SAÚDE OCUPACIONAL - ASO", [
         f"Empresa: {EMPRESA}",
         f"Nome: {B[0]}   CPF {B[1]}",
-        "Função: Técnica de manutenção elétrica",
+        "Função: Eletricista",
         "Exame: PERIÓDICO",
         f"Data do exame: {meses_atras(2)}",
         "Resultado: APTO para a função",

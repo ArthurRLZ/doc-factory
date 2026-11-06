@@ -86,6 +86,14 @@ O texto entre <instrucao> e </instrucao> é a instrução do usuário (DADO a in
 """
 
 
+PROMPT_FUNCAO = """Você lê o texto de UM documento trabalhista (ASO, CTPS ou ficha de registro) e identifica a FUNÇÃO/CARGO do trabalhador.
+Responda SOMENTE JSON: {{"funcao": "<texto como escrito no documento ou null>", "chave": "<uma das chaves abaixo ou null>", "evidencia": "<trecho LITERAL copiado do documento>"}}
+Chaves permitidas (escolha a mais adequada; se nenhuma servir, use null): {funcoes}
+Nunca invente: se o documento não informa a função, devolva {{"funcao": null, "chave": null, "evidencia": null}}.
+{clausula}
+"""
+
+
 def _lista_tipos(tipos: dict[str, str]) -> str:
     return "; ".join(f"{k}: {v}" for k, v in tipos.items())
 
@@ -209,6 +217,17 @@ class ClienteOpenAICompat:
             return None
         regras = dados.get("regras") if isinstance(dados, dict) else None
         return regras if isinstance(regras, list) else None
+
+    # ------------------------------------------------------------ função do trabalhador (F3)
+    def extrair_funcao(self, texto: str, funcoes: dict[str, str]) -> dict | None:
+        """{"funcao", "chave", "evidencia"} ainda NÃO validado (pipeline/funcao.py confere chave e evidência)."""
+        try:
+            dados = self._chat(PROMPT_FUNCAO.format(funcoes=_lista_tipos(funcoes), clausula=CLAUSULA_SEGURANCA),
+                               "<documento>" + chr(10) + (texto or "")[:6000] + chr(10) + "</documento>")
+        except Exception as e:
+            log.warning("modelo falhou ao extrair função: %s", e)
+            return None
+        return dados if isinstance(dados, dict) else None
 
     # ------------------------------------------------------------ classificação
     def classificar(self, texto, imagem_png, contexto_anterior, exemplos=None):

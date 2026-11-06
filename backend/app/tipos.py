@@ -181,6 +181,19 @@ TIPOS: dict[str, dict] = {
 # documentos que todo trabalhador terceirizado precisa ter (checklist do dossiê) — configurável
 DOCUMENTOS_EXIGIDOS_TRABALHADOR = ["IDENTIDADE", "CTPS", "ASO", "FICHA_EPI"]
 
+# Função do trabalhador → NRs exigidas (checklist dinâmico, F3). Apelidos sem acento e minúsculos.
+# PREMISSA DEMONSTRATIVA — validar com a área de SST antes de uso real (ver docs/PREMISSAS_LIMITACOES.md)
+FUNCOES_NR: dict[str, dict] = {
+    "eletricista":        {"nome": "Eletricista", "apelidos": ["eletricista", "eletrotecnico", "tecnico em eletrica", "instalador eletrico"], "nrs": ["NR-10", "NR-35"]},
+    "trabalho_em_altura": {"nome": "Trabalhador em altura", "apelidos": ["montador de andaime", "andaimeiro", "pintor industrial", "telhadista", "rigger"], "nrs": ["NR-35", "NR-18"]},
+    "soldador":           {"nome": "Soldador", "apelidos": ["soldador", "soldadora", "macariqueiro"], "nrs": ["NR-18", "NR-12"]},
+    "operador_maquinas":  {"nome": "Operador de máquinas/empilhadeira", "apelidos": ["operador de empilhadeira", "operador de maquinas", "operador de guindaste", "operador de munck", "operador de escavadeira"], "nrs": ["NR-11", "NR-12"]},
+    "espaco_confinado":   {"nome": "Trabalhador em espaço confinado", "apelidos": ["vigia de espaco confinado", "supervisor de espaco confinado", "trabalhador de espaco confinado"], "nrs": ["NR-33", "NR-35"]},
+    "inflamaveis":        {"nome": "Trabalhador com inflamáveis", "apelidos": ["frentista", "operador de tanque", "operador de combustiveis"], "nrs": ["NR-20"]},
+    "construcao_civil":   {"nome": "Construção civil (pedreiro/servente)", "apelidos": ["pedreiro", "servente", "ajudante de obras", "carpinteiro", "armador"], "nrs": ["NR-18"]},
+}
+PREFIXO_TOKEN_NR = "CERTIFICADO_NR:"     # item de checklist "CERTIFICADO_NR:NR-10" = certificado daquela NR
+
 # tipos que pertencem à PESSOA do trabalhador (entram no dossiê). Em contrato ou nota fiscal o CPF é de
 # uma parte ou de um cliente, não de um trabalhador terceirizado — esses não criam dossiê.
 TIPOS_DO_TRABALHADOR = {"IDENTIDADE", "CTPS", "ASO", "FICHA_EPI", "CERTIFICADO_NR", "CONTRACHEQUE",

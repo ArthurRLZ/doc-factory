@@ -37,7 +37,8 @@ def test_dossie_e_checklist(lote_terceiros):
     a, b = por_cpf["***.982.247-**"], por_cpf["***.995.350-**"]
     assert a["documentos"] == 4 and b["documentos"] == 3
     assert set(a["faltando"]) == {"IDENTIDADE", "CTPS"} and a["vencidos"] == 1        # ASO vencido
-    assert set(b["faltando"]) == {"IDENTIDADE", "FICHA_EPI"} and b["vencendo"] == 1    # NR-10 vencendo
+    # B é eletricista (F3): a função exige NR-10 (tem, vencendo) e NR-35 (não tem)
+    assert set(b["faltando"]) == {"IDENTIDADE", "FICHA_EPI", "CERTIFICADO_NR:NR-35"} and b["vencendo"] == 1
 
     d = c.get(f"/trabalhadores/{a['id']}/dossie").json()
     status = {i["tipo"]: i["status"] for i in d["checklist"]}
@@ -46,7 +47,8 @@ def test_dossie_e_checklist(lote_terceiros):
     assert all(doc["trabalhador"]["id"] == a["id"] for doc in d["itens"])
 
     db_b = c.get(f"/trabalhadores/{b['id']}/dossie").json()
-    assert [x["tipo"] for x in db_b["outros_alertas"]] == ["CERTIFICADO_NR"]
+    assert db_b["outros_alertas"] == []          # o NR-10 agora é item exigido do checklist, não alerta avulso
+    assert {i["tipo"]: i["status"] for i in db_b["checklist"]}["CERTIFICADO_NR:NR-10"] == "vencendo"
     assert c.get("/trabalhadores/999999/dossie").status_code == 404
 
 

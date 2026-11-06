@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.llm import contador, obter_llm
 from app.models import Documento, Lote, Pagina, Trabalhador, VersaoLote, agora
-from app.pipeline import aprendizado, fraude, identidade, rasterizar
+from app.pipeline import aprendizado, fraude, funcao, identidade, rasterizar
 from app.pipeline.explicabilidade import decidido_por
 from app.pipeline.anonimizar import indices_sensiveis, mascarar_texto, tarjar_imagem
 from app.pipeline.automacao import obter_limiar
@@ -177,6 +177,8 @@ def segmentar_e_montar(db: Session, lote: Lote) -> None:
             doc.decidido_por, doc.ia_justificativa = decidido_por(pags, doc.tipo)
             db.flush()
             fraude.aplicar(db, lote, doc, pags)
+        db.flush()
+        _atualizar_funcoes(db, lote)
         db.commit()
     except Exception:
         db.rollback()
@@ -191,6 +193,17 @@ def segmentar_e_montar(db: Session, lote: Lote) -> None:
             st.delete(key)
         except Exception:
             log.exception("Falha ao remover arquivo antigo após segmentação: %s", key)
+
+
+def _atualizar_funcoes(db: Session, lote: Lote) -> None:
+    """Função de cada trabalhador tocado no lote (F3): define as NRs exigidas no checklist."""
+    # consulta direta: as coleções em memória (lote.documentos, t.documentos) podem estar desatualizadas aqui
+    ids = set(db.scalars(select(Documento.trabalhador_id).where(Documento.lote_id == lote.id,
+                                                               Documento.trabalhador_id.is_not(None))))
+    llm = obter_llm()
+    for t in db.scalars(select(Trabalhador).where(Trabalhador.id.in_(ids))) if ids else []:
+        docs = list(db.scalars(select(Documento).where(Documento.trabalhador_id == t.id)))
+        funcao.atualizar_funcao(db, t, docs, llm, lote.id)
 
 
 def atribuir_trabalhador(db: Session, doc: Documento, paginas: list[Pagina]) -> None:
