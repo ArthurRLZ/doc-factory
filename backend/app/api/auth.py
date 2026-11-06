@@ -81,9 +81,9 @@ def registrar(dados: CadastroIn, db: Session = Depends(get_db)):
     db.add(usuario)
     try:
         db.commit()
-    except IntegrityError:
+    except IntegrityError as err:
         db.rollback()
-        raise HTTPException(409, "Este usuário já está cadastrado")
+        raise HTTPException(409, "Este usuário já está cadastrado") from err
     return TokenOut(access_token=criar_token(usuario.login, usuario.perfil), perfil=usuario.perfil)
 def _exigir_login_ativo() -> None:
     if not settings.AUTH_ATIVO:
