@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     AMBIENTE: str = "desenvolvimento"   # desenvolvimento | producao
 
     # --- Segurança -------------------------------------------------------
+    CADASTRO_ABERTO: bool = True        # /auth/registrar: qualquer pessoa cria conta de analista (desligue em produção)
     LOGIN_MAX_TENTATIVAS: int = 5       # erros seguidos de senha antes de bloquear o login
     LOGIN_BLOQUEIO_MIN: int = 5         # minutos de bloqueio
     MAX_MEGAPIXELS_PAGINA: float = 60.0 # página maior que isso é renderizada com DPI menor (protege a memória)

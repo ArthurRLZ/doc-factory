@@ -128,7 +128,7 @@ def test_modo_producao_recusa_configuracao_insegura(monkeypatch):
     with pytest.raises(RuntimeError, match="producao"):
         with TestClient(app):
             pass
-    for k, v in (("AUTH_ATIVO", True), ("JWT_SEGREDO", "x" * 40), ("CPF_SEGREDO", "y" * 40),
+    for k, v in (("AUTH_ATIVO", True), ("JWT_SEGREDO", "x" * 40), ("CPF_SEGREDO", "y" * 40), ("CADASTRO_ABERTO", False),
                  ("CORS_ORIGINS", "https://app.exemplo.com")):
         monkeypatch.setattr(settings, k, v)
     assert problemas_de_seguranca() == []
@@ -192,3 +192,26 @@ def test_lote_terceiros_titulos_na_tela(lote_terceiros):
     titulos = {d["tipo"]: d["titulo"] for d in c.get(f"/lotes/{lote['id']}/documentos").json()}
     assert titulos["CNDT"].upper().startswith("CERTID")
     assert "TRIBUTOS FEDERAIS" in titulos["CND_FEDERAL"].upper() or titulos["CND_FEDERAL"].upper().startswith("CERTID")
+
+
+def test_chave_ou_token_de_login(monkeypatch, processado):
+    """Com API_KEY ligada: integração usa a chave; pessoa logada usa só o token (o front não tem a chave)."""
+    from app.security import criar_token
+    c, _ = processado
+    monkeypatch.setattr(settings, "API_KEY", "chave-secreta")
+    monkeypatch.setattr(settings, "AUTH_ATIVO", True)
+    with SessionLocal() as db:
+        if not db.query(Usuario).filter_by(login="pessoa_front").first():
+            db.add(Usuario(login="pessoa_front", nome="x", perfil="analista", senha_hash=hash_senha("senha-123456")))
+            db.commit()
+    token = {"Authorization": f"Bearer {criar_token('pessoa_front', 'analista')}"}
+    assert c.get("/tipos", headers=token).status_code == 200                       # token sozinho basta
+    assert c.get("/tipos", headers={"Authorization": "Bearer token-falso"}).status_code == 401
+    assert c.get("/tipos").status_code == 401                                        # sem nada
+
+
+def test_cadastro_fechado(monkeypatch, processado):
+    c, _ = processado
+    monkeypatch.setattr(settings, "CADASTRO_ABERTO", False)
+    r = c.post("/auth/registrar", json={"login": "alguem_novo", "nome": "x", "senha": "senha-123456"})
+    assert r.status_code == 403 and "administrador" in r.json()["erro"]["mensagem"]

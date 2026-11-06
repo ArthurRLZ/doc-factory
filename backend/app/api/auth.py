@@ -68,7 +68,9 @@ def login(form: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get
 
 @router.post("/auth/registrar", response_model=TokenOut, status_code=201)
 def registrar(dados: CadastroIn, db: Session = Depends(get_db)):
-    """Cria uma conta de analista e autentica o usuário."""
+    """Cria uma conta de analista e autentica o usuário (só com CADASTRO_ABERTO=true)."""
+    if not settings.CADASTRO_ABERTO:
+        raise HTTPException(403, "Cadastro desativado: peça a um administrador para criar sua conta")
     if db.scalar(select(Usuario).where(Usuario.login == dados.login)):
         raise HTTPException(409, "Este usuário já está cadastrado")
 
@@ -85,6 +87,8 @@ def registrar(dados: CadastroIn, db: Session = Depends(get_db)):
         db.rollback()
         raise HTTPException(409, "Este usuário já está cadastrado") from err
     return TokenOut(access_token=criar_token(usuario.login, usuario.perfil), perfil=usuario.perfil)
+
+
 def _exigir_login_ativo() -> None:
     if not settings.AUTH_ATIVO:
         raise HTTPException(403, "Gestão de usuários só com o login ativo (AUTH_ATIVO=true). "

@@ -36,6 +36,8 @@ def problemas_de_seguranca() -> list[str]:
         p.append("JWT_SEGREDO não definido: os logins caem a cada reinício")
     if not settings.CPF_SEGREDO:
         p.append("CPF_SEGREDO não definido: o segredo da impressão do CPF fica no próprio banco")
+    if settings.AUTH_ATIVO and settings.CADASTRO_ABERTO:
+        p.append("CADASTRO_ABERTO=true: qualquer pessoa cria uma conta de analista e vê os documentos")
     if "*" in settings.CORS_ORIGINS:
         p.append("CORS_ORIGINS=*: qualquer site pode chamar a API")
     return p

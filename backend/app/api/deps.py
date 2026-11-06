@@ -14,11 +14,23 @@ from app.security import ler_token, perfil_atende
 oauth2 = OAuth2PasswordBearer(tokenUrl="/auth/login", auto_error=False)
 
 
-def exigir_api_key(x_api_key: str | None = Header(default=None)):
-    """Chave única opcional (integrações máquina-a-máquina). Login com perfis: AUTH_ATIVO=true."""
+def exigir_api_key(x_api_key: str | None = Header(default=None), authorization: str | None = Header(default=None)):
+    """Com API_KEY definida, a rota exige UMA das duas credenciais:
+      - X-API-Key válida (integrações sistema-a-sistema), ou
+      - token de login válido (pessoas usando o front, com AUTH_ATIVO=true).
+    O perfil (analista/revisor/admin) continua sendo checado depois, em usuario_atual."""
+    if not settings.API_KEY:
+        return
     # comparação em tempo constante: não deixa medir pelo tempo de resposta quantos caracteres acertou
-    if settings.API_KEY and not hmac.compare_digest((x_api_key or "").encode(), settings.API_KEY.encode()):
-        raise HTTPException(401, "X-API-Key inválida ou ausente")
+    if x_api_key and hmac.compare_digest(x_api_key.encode(), settings.API_KEY.encode()):
+        return
+    if settings.AUTH_ATIVO and authorization and authorization.lower().startswith("bearer "):
+        try:
+            ler_token(authorization[7:].strip())
+            return
+        except jwt.PyJWTError:
+            pass
+    raise HTTPException(401, "Credencial ausente ou inválida: envie X-API-Key ou faça login")
 
 
 @dataclass
