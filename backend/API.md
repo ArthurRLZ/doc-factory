@@ -118,6 +118,39 @@ const { data: lote } = await api.post('/lotes', form, {
 Outros: `GET /lotes` (lista) · `GET /lotes/{id}/documentos` · `GET /lotes/{id}/zip` (todos os PDFs + manifesto) ·
 `GET /vencimentos?ate_dias=30` · `GET /busca?q=` · `GET /health`.
 
+## Relatório de risco de privacidade (para o encarregado de dados — DPO)
+
+`GET /lotes/{id}/privacidade?limite=100` (perfil analista; só lote `concluido`, senão 409). Responde "este lote tem
+340 CPFs (212 pessoas distintas) e 12 documentos com dados de saúde" **antes de compartilhar**. Devolve só números
+e evidências; nenhum dado pessoal (nem impressão de CPF) sai por aqui.
+
+```json
+{
+  "nivel_risco": "alto",                        // alto: tem dado sensível · medio: só identificadores · baixo: nenhum
+  "motivos": ["2 documento(s) com dados pessoais sensíveis (art. 5º, II da LGPD)"],
+  "resumo": "Este lote (12 documento(s)) tem 11 CPF(s) (2 pessoa(s) distinta(s)), 4 nome(s) de pessoa, 2 documento(s) com dados de saúde.",
+  "totais": {"paginas": 14, "documentos": 12, "documentos_com_dados_pessoais": 9,
+             "documentos_com_dados_sensiveis": 2, "pessoas_distintas": 2, "documentos_em_revisao": 1},
+  "identificadores": {"CPF": {"nome": "CPF", "ocorrencias": 11, "documentos": 9, "pessoas_distintas": 2},
+                      "NOME": {...}, "RG": {...}, "ENDERECO": {...}, "CEP": {...}, "EMAIL": {...}, "TELEFONE": {...}, "CNPJ": {...}},
+  "dados_sensiveis": {"SAUDE": {"nome": "Dados de saúde", "documentos": 2, "por_tipo": {"ASO": 2}, "termos_mais_frequentes": []},
+                      "BIOMETRIA": {...}, "SINDICAL": {...}},
+  "documentos_sensiveis": [{"documento_id": "...", "ordem": 3, "tipo": "ASO", "tipo_nome": "...", "titulo": "...",
+                            "pagina_inicio": 5, "pagina_fim": 5, "categorias": ["SAUDE"],
+                            "evidencias": {"SAUDE": ["tipo do documento: ASO"]}}],
+  "documentos_sensiveis_truncado": false,       // true quando passou de `limite` (os totais continuam completos)
+  "deteccao": {"nomes": true, "enderecos": true},   // se estiverem false, nomes/endereços ficam subcontados
+  "recomendacoes": ["..."], "aviso": "..."
+}
+```
+
+Como é calculado (tudo determinístico, sem modelo): identificadores = marcadores `[CPF]`, `[NOME]`... que a
+anonimização já deixa no texto guardado (funciona em lotes antigos, sem reprocessar); pessoas distintas = impressões
+de CPF **válido** já guardadas nas páginas; dados sensíveis = tipo do documento (ASO é sempre saúde) + léxico de termos
+(termos genéricos exigem mais de um acerto). `ocorrencias` do CPF inclui qualquer número de 11 dígitos; `pessoas_distintas`
+só conta CPF com dígito verificador correto. **Os números são o mínimo detectado** (nome/endereço que a detecção não
+reconhece não entram) — triagem, não parecer jurídico.
+
 ## Meta de automação (para o pitch e para uma tela de configuração)
 
 - `GET /automacao` → `{limiar_atual, curva: [{limiar, automaticos, para_revisao, percentual_automatico,

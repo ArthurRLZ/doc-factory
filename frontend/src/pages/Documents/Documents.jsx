@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import Sidebar from '../../components/Sidebar';
 import Header from '../../components/Header';
 import api from '../../services/api';
+import RelatorioPrivacidade from '../../components/Privacidade/RelatorioPrivacidade';
 
 const button = 'rounded-lg border border-slate-200 px-3 py-2 text-xs font-medium hover:bg-slate-50 disabled:opacity-50';
 
@@ -17,6 +18,7 @@ export default function Documents() {
   const [aberto, setAberto] = useState(null);
   const [corte, setCorte] = useState('');
   const [tipo, setTipo] = useState('');
+  const [versaoRelatorio, setVersaoRelatorio] = useState(0);   // sobe após revisar/reprocessar: o relatório de privacidade é buscado de novo
 
   const atualizar = useCallback(async () => {
     try {
@@ -51,14 +53,14 @@ export default function Documents() {
   async function revisar(acao, extras = {}) {
     try {
       await api.post(`/documentos/${aberto.id}/revisao`, { acao, usuario: 'revisor', ...extras });
-      setAberto(null); setCorte(''); await atualizar();
+      setAberto(null); setCorte(''); setVersaoRelatorio(v => v + 1); await atualizar();
     } catch (e) { setErro(e.response?.data?.erro?.mensagem || 'Não foi possível salvar a revisão.'); }
   }
 
   async function reprocessar(tudo) {
     try {
       await api.post(`/lotes/${loteAtivo}/reprocessar`, null, { params: { tudo } });
-      setAberto(null); await atualizar();
+      setAberto(null); setVersaoRelatorio(v => v + 1); await atualizar();
     } catch (e) { setErro(e.response?.data?.erro?.mensagem || 'Não foi possível reprocessar o lote.'); }
   }
 
@@ -74,6 +76,7 @@ export default function Documents() {
           {lotes.length === 0 ? <p className="text-sm text-slate-500">Nenhum lote enviado.</p> : <div className="space-y-2">{lotes.map(l => <button key={l.id} onClick={() => { setLoteAtivo(l.id); setAberto(null); }} className="w-full text-left rounded-lg bg-slate-50 p-3 text-sm"><strong>{l.nome}</strong> — {l.status} · {l.paginas_processadas}/{l.total_paginas} páginas ({Math.round(l.progresso * 100)}%){l.erro && <span className="block text-red-700">{l.erro}</span>}</button>)}</div>}
         </section>
         {loteAtivo && <div className="flex flex-wrap gap-2"><button className={button} onClick={() => reprocessar(false)}>Reprocessar páginas com erro</button><button className={button} onClick={() => reprocessar(true)}>Reprocessar lote completo</button></div>}
+        {loteAtivo && <RelatorioPrivacidade loteId={loteAtivo} concluido={lotes.find(l => l.id === loteAtivo)?.status === 'concluido'} recarregar={versaoRelatorio} />}
         <section className="rounded-xl bg-white border border-slate-100 p-5 space-y-4"><div className="flex justify-between items-center gap-4"><h2 className="font-bold">Documentos {loteAtivo && 'do lote'}</h2><button className={button} onClick={() => { setLoteAtivo(''); setAberto(null); }}>Todos os lotes</button></div>
           <input className="border rounded-lg px-3 py-2 text-sm w-full" placeholder="Buscar no texto dos documentos" value={busca} onChange={e => setBusca(e.target.value)} />
           {documentos.length === 0 ? <p className="text-sm text-slate-500">Nenhum documento encontrado.</p> : <div className="space-y-2">{documentos.map(d => <button key={d.id} className="w-full text-left p-3 rounded-lg border border-slate-100 hover:bg-slate-50 text-sm" onClick={() => { setAberto(d); setTipo(d.tipo); }}><strong>{d.titulo || d.tipo_nome}</strong> · {d.tipo_nome} · páginas {d.pagina_inicio + 1}–{d.pagina_fim + 1} · {d.status_revisao}</button>)}</div>}

@@ -1,0 +1,142 @@
+{
+ "lote_id": "9224f9e409304ce296925361ff79cfd1",
+ "lote": "Terceiros Março.pdf",
+ "gerado_em": "2026-11-06T05:26:31.655275+00:00",
+ "nivel_risco": "alto",
+ "motivos": [
+  "2 documento(s) com dados pessoais sensíveis (art. 5º, II da LGPD)"
+ ],
+ "resumo": "Este lote (12 documento(s)) tem 11 CPF(s) (2 pessoa(s) distinta(s)), 4 nome(s) de pessoa, 2 documento(s) com dados de saúde.",
+ "totais": {
+  "paginas": 14,
+  "documentos": 12,
+  "documentos_com_dados_pessoais": 9,
+  "documentos_com_dados_sensiveis": 2,
+  "pessoas_distintas": 2,
+  "documentos_em_revisao": 3
+ },
+ "identificadores": {
+  "CPF": {
+   "nome": "CPF",
+   "ocorrencias": 11,
+   "documentos": 8,
+   "pessoas_distintas": 2
+  },
+  "RG": {
+   "nome": "RG",
+   "ocorrencias": 0,
+   "documentos": 0
+  },
+  "NOME": {
+   "nome": "Nome de pessoa",
+   "ocorrencias": 4,
+   "documentos": 4
+  },
+  "ENDERECO": {
+   "nome": "Endereço",
+   "ocorrencias": 0,
+   "documentos": 0
+  },
+  "CEP": {
+   "nome": "CEP",
+   "ocorrencias": 0,
+   "documentos": 0
+  },
+  "EMAIL": {
+   "nome": "E-mail",
+   "ocorrencias": 0,
+   "documentos": 0
+  },
+  "TELEFONE": {
+   "nome": "Telefone",
+   "ocorrencias": 0,
+   "documentos": 0
+  },
+  "CNPJ": {
+   "nome": "CNPJ (empresa; pode ser dado pessoal em MEI/empresário individual)",
+   "ocorrencias": 10,
+   "documentos": 9
+  }
+ },
+ "dados_sensiveis": {
+  "SAUDE": {
+   "nome": "Dados de saúde",
+   "documentos": 2,
+   "por_tipo": {
+    "ASO": 2
+   },
+   "termos_mais_frequentes": [
+    "atestado de saude",
+    "medico examinador",
+    "crm"
+   ]
+  },
+  "BIOMETRIA": {
+   "nome": "Dados biométricos",
+   "documentos": 0,
+   "por_tipo": {},
+   "termos_mais_frequentes": []
+  },
+  "SINDICAL": {
+   "nome": "Filiação sindical",
+   "documentos": 0,
+   "por_tipo": {},
+   "termos_mais_frequentes": []
+  }
+ },
+ "documentos_sensiveis": [
+  {
+   "documento_id": "ffbec1ca144743c0bdc026d5025e2eff",
+   "ordem": 0,
+   "tipo": "ASO",
+   "tipo_nome": "Atestado de Saúde Ocupacional (ASO)",
+   "titulo": "ATESTADO DE SAÚDE OCUPACIONAL - ASO",
+   "pagina_inicio": 0,
+   "pagina_fim": 0,
+   "categorias": [
+    "SAUDE"
+   ],
+   "evidencias": {
+    "SAUDE": [
+     "tipo do documento: ASO",
+     "atestado de saude",
+     "medico examinador",
+     "crm"
+    ]
+   }
+  },
+  {
+   "documento_id": "3440d62710ce46da9e652c33a5baa08b",
+   "ordem": 5,
+   "tipo": "ASO",
+   "tipo_nome": "Atestado de Saúde Ocupacional (ASO)",
+   "titulo": "ATESTADO DE SAÚDE OCUPACIONAL - ASO",
+   "pagina_inicio": 5,
+   "pagina_fim": 5,
+   "categorias": [
+    "SAUDE"
+   ],
+   "evidencias": {
+    "SAUDE": [
+     "tipo do documento: ASO",
+     "atestado de saude",
+     "medico examinador",
+     "crm"
+    ]
+   }
+  }
+ ],
+ "documentos_sensiveis_truncado": false,
+ "deteccao": {
+  "nomes": true,
+  "enderecos": true
+ },
+ "recomendacoes": [
+  "Compartilhe a versão anonimizada (GET /lotes/9224f9e409304ce296925361ff79cfd1/zip?anonimizado=true), nunca os PDFs originais.",
+  "Dado sensível exige base legal específica (LGPD, art. 11): confirme-a antes de compartilhar.",
+  "2 pessoa(s) identificada(s): confirme que o compartilhamento é necessário para a finalidade (princípio da necessidade, LGPD art. 6º, III).",
+  "3 documento(s) ainda estão na fila de revisão: o relatório pode mudar depois dela.",
+  "Abra alguns PDFs anonimizados por amostragem: nome ou endereço que a detecção não reconheceu continua visível."
+ ],
+ "aviso": "Triagem automática por padrões e palavras-chave; não substitui a avaliação do encarregado de dados nem é parecer jurídico. Os números são o MÍNIMO detectado."
+}
