@@ -75,7 +75,7 @@ async def _cabecalhos_de_seguranca(request: Request, call_next):
     return resposta
 
 protegido = [Depends(exigir_api_key)]
-app.include_router(auth.router, dependencies=protegido)
+app.include_router(auth.router)
 app.include_router(painel.router, dependencies=protegido)
 app.include_router(automacao.router, dependencies=protegido)
 app.include_router(automacao.router_aprendizados, dependencies=protegido)

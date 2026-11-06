@@ -36,7 +36,7 @@ from app.tipos import (
     nome_tipo,
     setor_do_tipo,
 )
-from app.status import StatusRevisao
+from app.status import StatusLote, StatusRevisao
 
 router = APIRouter(tags=["documentos"])
 
@@ -308,6 +308,8 @@ def revisar(doc_id: str, r: RevisaoIn, db: Session = Depends(get_db), u: Usuario
     """Ação do revisor: aprovar · alterar_tipo · alterar_prioridade · dividir · juntar_proximo.
     Toda ação fica na trilha de auditoria (antes/depois, quem, quando)."""
     d = _obter(db, doc_id)
+    if d.lote.status in (StatusLote.PROCESSANDO, StatusLote.SEGMENTANDO):
+        raise HTTPException(409, "Aguarde o processamento do lote terminar antes de revisar.")
     usuario = u.login if u.autenticado else (r.usuario or "anonimo")
     antes = _snapshot(d)
     res = _ACOES[r.acao](db, d, r, usuario)

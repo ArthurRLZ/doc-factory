@@ -16,6 +16,13 @@ CORS já libera `http://localhost:5173` (Vite) e `http://localhost:4200`. Para o
 - **Login** (só se `AUTH_ATIVO=true` no backend): `POST /auth/login` (form `username`, `password`) →
   `{access_token, perfil}`; envie `Authorization: Bearer <token>`. Com login desligado, nada é exigido.
 
+## Cadastro e autenticação
+
+- `POST /auth/registrar` recebe `{login, nome, senha}`, cria uma conta de perfil `analista` e devolve `{access_token, perfil}`.
+- `POST /auth/login` recebe formulário `username` e `password`; envie o token retornado no cabeçalho `Authorization` das rotas protegidas.
+- O Docker Compose ativa `AUTH_ATIVO`. No desenvolvimento local, habilite essa opção para proteger as rotas do backend.
+- Com `AUTH_ATIVO=true`, as rotas protegidas usam JWT; a chave compartilhada `API_KEY` é usada apenas no modo sem autenticação por usuário.
+
 ## Documento (formato usado em todas as telas)
 
 ```json

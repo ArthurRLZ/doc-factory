@@ -9,6 +9,7 @@ Layout das chaves:
 import json
 import os
 import shutil
+import tempfile
 from functools import lru_cache
 from pathlib import Path
 
@@ -43,12 +44,26 @@ class LocalStorage(Storage):
         return p
 
     def put_file(self, key, caminho):
-        shutil.copyfile(caminho, self._p(key))
+        destino = self._p(key)
+        fd, temporario = tempfile.mkstemp(dir=destino.parent, prefix=".upload-")
+        os.close(fd)
+        try:
+            shutil.copyfile(caminho, temporario)
+            os.replace(temporario, destino)
+        finally:
+            if os.path.exists(temporario):
+                os.unlink(temporario)
 
     def put_bytes(self, key, dados, content_type="application/octet-stream"):
-        tmp = self._p(key).with_suffix(".tmp")
-        tmp.write_bytes(dados)
-        os.replace(tmp, self._p(key))                 # escrita atômica
+        destino = self._p(key)
+        fd, temporario = tempfile.mkstemp(dir=destino.parent, prefix=".arquivo-")
+        try:
+            with os.fdopen(fd, "wb") as f:
+                f.write(dados)
+            os.replace(temporario, destino)
+        finally:
+            if os.path.exists(temporario):
+                os.unlink(temporario)
 
     def get_bytes(self, key):
         return self._p(key).read_bytes()

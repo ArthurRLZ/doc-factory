@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.llm import obter_llm
-from app.models import Documento, Lote, Pagina, Trabalhador, agora
+from app.models import Documento, Lote, Pagina, Trabalhador, VersaoLote, agora
 from app.pipeline import aprendizado, fraude, identidade, rasterizar
 from app.pipeline.anonimizar import indices_sensiveis, mascarar_texto, tarjar_imagem
 from app.pipeline.automacao import obter_limiar
@@ -135,11 +135,12 @@ def finalizar_lote_se_pronto(db: Session, lote_id: str) -> bool:
 
 def segmentar_e_montar(db: Session, lote: Lote) -> None:
     st = get_storage()
-    # idempotência: se for reprocessamento, apaga a segmentação anterior
+    # Os arquivos anteriores só são removidos após a nova segmentação ser confirmada.
+    antigos = []
+    preservados = {d[k] for v in db.scalars(select(VersaoLote).where(VersaoLote.lote_id == lote.id))
+                   for d in v.dados.get("documentos", []) for k in ("pdf_key", "pdf_anon_key") if d.get(k)}
     for d in list(lote.documentos):
-        for k in (d.pdf_key, d.pdf_anon_key):
-            if k:
-                st.delete(k)
+        antigos.extend(k for k in (d.pdf_key, d.pdf_anon_key) if k and k not in preservados)
         db.delete(d)
     for p in lote.paginas:
         p.documento_id = None
@@ -152,22 +153,38 @@ def segmentar_e_montar(db: Session, lote: Lote) -> None:
              for p in lote.paginas]
     por_numero = {p.numero: p for p in lote.paginas}
 
-    for ordem, dp in enumerate(segmentar(infos, obter_limiar(db))):
-        doc = Documento(lote_id=lote.id, ordem=ordem, tipo=dp.tipo,
-                        pagina_inicio=min(dp.paginas), pagina_fim=max(dp.paginas),
-                        confianca=dp.confianca, motivos=dp.motivos,
-                        status_revisao=StatusRevisao.PENDENTE if dp.revisao else StatusRevisao.AUTO_APROVADO)
-        db.add(doc)
-        db.flush()
-        pags = [por_numero[n] for n in dp.paginas]
-        for p in pags:
-            p.documento_id = doc.id
-        gerar_arquivos(lote, doc, pags)
-        atribuir_trabalhador(db, doc, pags)
-        resumir_documento(lote, doc)
-        db.flush()
-        fraude.aplicar(db, lote, doc, pags)      # depois da validade: usa as datas lidas
-    db.commit()
+    novos = []
+    try:
+        for ordem, dp in enumerate(segmentar(infos, obter_limiar(db))):
+            doc = Documento(lote_id=lote.id, ordem=ordem, tipo=dp.tipo,
+                            pagina_inicio=min(dp.paginas), pagina_fim=max(dp.paginas),
+                            confianca=dp.confianca, motivos=dp.motivos,
+                            status_revisao=StatusRevisao.PENDENTE if dp.revisao else StatusRevisao.AUTO_APROVADO)
+            db.add(doc)
+            db.flush()
+            novos.extend((key_documento(lote.id, doc.id), key_documento(lote.id, doc.id, anon=True)))
+            pags = [por_numero[n] for n in dp.paginas]
+            for p in pags:
+                p.documento_id = doc.id
+            gerar_arquivos(lote, doc, pags)
+            atribuir_trabalhador(db, doc, pags)
+            resumir_documento(lote, doc)
+            db.flush()
+            fraude.aplicar(db, lote, doc, pags)
+        db.commit()
+    except Exception:
+        db.rollback()
+        for key in novos:
+            try:
+                st.delete(key)
+            except Exception:
+                log.exception("Falha ao remover arquivo de segmentação não confirmada: %s", key)
+        raise
+    for key in antigos:
+        try:
+            st.delete(key)
+        except Exception:
+            log.exception("Falha ao remover arquivo antigo após segmentação: %s", key)
 
 
 def atribuir_trabalhador(db: Session, doc: Documento, paginas: list[Pagina]) -> None:

@@ -17,8 +17,11 @@ from app.api.deps import UsuarioAtual, admin, analista, revisor
 from app.api.documentos import doc_out
 from app.config import settings
 from app.db import get_db
+from app.models import Lote, Pagina, Revisao, VersaoLote, novo_id
+from app.pipeline import fraude
 from app.models import Lote, Pagina, Revisao, Trabalhador, novo_id
-from app.pipeline import fraude, rasterizar
+from app.models import Trabalhador
+from app.pipeline import rasterizar
 from app.pipeline.rasterizar import contar_paginas
 from app.schemas import DocumentoOut, LoteOut, PaginaOut
 from app.storage import get_storage, key_original
@@ -125,7 +128,11 @@ async def criar_lote(arquivo: UploadFile = File(...), nome: str | None = Form(No
         db.commit()
     except Exception:
         db.rollback()
-        get_storage().delete(key)          # não deixa arquivo órfão no storage
+        try:
+            get_storage().delete(key)
+        except Exception:
+            import logging
+            logging.getLogger(__name__).exception("Falha ao remover arquivo após erro ao registrar lote")
         raise
     return lote_out(db, lote)
 
@@ -158,20 +165,55 @@ def documentos_do_lote(lote_id: str, db: Session = Depends(get_db), _u: UsuarioA
 
 
 @router.post("/{lote_id}/reprocessar", response_model=LoteOut)
-def reprocessar(lote_id: str, tudo: bool = False, db: Session = Depends(get_db), _u: UsuarioAtual = Depends(revisor)):
+def reprocessar(lote_id: str, tudo: bool = False, db: Session = Depends(get_db), u: UsuarioAtual = Depends(revisor)):
     """Recoloca na fila as páginas que falharam (ou todas, com ?tudo=true)."""
     lote = _obter(db, lote_id)
-    if db.scalar(select(func.count()).select_from(Revisao).where(Revisao.lote_id == lote_id)):
-        raise HTTPException(409, "O lote possui revisões e não pode ser reprocessado sem perder o histórico.")
+    if lote.status in ("processando", "segmentando"):
+        raise HTTPException(409, "Aguarde o processamento atual terminar.")
     cond = [Pagina.lote_id == lote_id]
     if not tudo:
         cond.append(Pagina.status.in_((StatusPagina.ERRO, StatusPagina.FALHOU)))
+    if not db.scalar(select(func.count()).select_from(Pagina).where(*cond)):
+        raise HTTPException(409, "Nenhuma página para reprocessar.")
+    if lote.documentos:
+        def retrato(obj):
+            return json.loads(json.dumps({col.name: getattr(obj, col.name) for col in obj.__table__.columns},
+                                         default=str, ensure_ascii=False))
+        versao = VersaoLote(lote_id=lote_id, usuario=u.login, dados={
+            "documentos": [retrato(d) for d in lote.documentos],
+            "paginas": [retrato(p) for p in lote.paginas],
+            "revisoes": [retrato(r) for r in db.scalars(select(Revisao).where(Revisao.lote_id == lote_id))],
+        })
+        db.add(versao)
     db.execute(update(Pagina).where(*cond).values(status=StatusPagina.PENDENTE, tentativas=0, erro=None))
     lote.status, lote.erro = StatusLote.PROCESSANDO, None
     db.commit()
     return lote_out(db, lote)
 
 
+@router.get("/{lote_id}/versoes")
+def versoes_do_lote(lote_id: str, db: Session = Depends(get_db), _u: UsuarioAtual = Depends(revisor)):
+    """Resultados e revisões preservados antes de cada reprocessamento."""
+    _obter(db, lote_id)
+    versoes = db.scalars(select(VersaoLote).where(VersaoLote.lote_id == lote_id).order_by(VersaoLote.id.desc()))
+    return [{"id": v.id, "criado_em": v.criado_em, "usuario": v.usuario, **v.dados} for v in versoes]
+
+
+@router.get("/{lote_id}/versoes/{versao_id}/documentos/{documento_id}/pdf")
+def pdf_da_versao(lote_id: str, versao_id: int, documento_id: str, anonimizado: bool = True,
+                  db: Session = Depends(get_db), _u: UsuarioAtual = Depends(revisor)):
+    versao = db.get(VersaoLote, versao_id)
+    if not versao or versao.lote_id != lote_id:
+        raise HTTPException(404, "Versão não encontrada")
+    documento = next((d for d in versao.dados.get("documentos", []) if d["id"] == documento_id), None)
+    key = documento and documento.get("pdf_anon_key" if anonimizado else "pdf_key")
+    if not key:
+        raise HTTPException(404, "PDF da versão não encontrado")
+    try:
+        conteudo = get_storage().get_bytes(key)
+    except FileNotFoundError:
+        raise HTTPException(404, "PDF da versão não encontrado no armazenamento") from None
+    return Response(conteudo, media_type="application/pdf")
 @router.delete("/{lote_id}")
 def apagar_lote(lote_id: str, db: Session = Depends(get_db), u: UsuarioAtual = Depends(admin)):
     """LGPD (direito de eliminação): apaga o lote, as páginas, os documentos, os arquivos no storage e as
@@ -224,11 +266,15 @@ def baixar_zip(lote_id: str, anonimizado: bool = True, db: Session = Depends(get
 @router.get("/{lote_id}/paginas/{numero}/imagem")
 def imagem_pagina(lote_id: str, numero: int, thumb: bool = True, db: Session = Depends(get_db),
                   u: UsuarioAtual = Depends(analista)):
-    if not thumb and u.autenticado and u.perfil == "analista":
-        raise HTTPException(403, "A imagem em alta resolução (sem tarjas) exige perfil revisor ou superior")
+    if u.autenticado and u.perfil == "analista":
+        raise HTTPException(403, "As imagens originais e miniaturas exigem perfil revisor ou superior")
     p = db.scalar(select(Pagina).where(Pagina.lote_id == lote_id, Pagina.numero == numero))
     key = p and (p.thumb_key if thumb else p.imagem_key)
     if not key:
         raise HTTPException(404, "Imagem ainda não gerada")
-    return Response(get_storage().get_bytes(key), media_type="image/jpeg" if thumb else "image/png",
+    try:
+        conteudo = get_storage().get_bytes(key)
+    except FileNotFoundError:
+        raise HTTPException(404, "Imagem da página não encontrada no armazenamento") from None
+    return Response(conteudo, media_type="image/jpeg" if thumb else "image/png",
                     headers={"Cache-Control": "private, max-age=3600"})

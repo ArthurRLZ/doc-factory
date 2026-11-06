@@ -19,6 +19,7 @@ services:
       STORAGE_BACKEND: local
       DATA_DIR: /data             # volume compartilhado: a API grava o PDF, o worker lê
       WORKER_INLINE: "false"
+      AUTH_ATIVO: "true"
     volumes: [dados:/data]
     ports: ["8000:8000"]
     healthcheck:

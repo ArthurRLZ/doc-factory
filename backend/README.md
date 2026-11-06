@@ -7,6 +7,24 @@ monta o dossiê de cada trabalhador sem guardar o CPF e aponta o que falta, o qu
 
 **Guia para o front:** [`API.md`](API.md) — cada tela e componente → rota e campos.
 
+## Cópia e restauração local
+
+Pare a API e todos os workers antes de criar a cópia. O ZIP contém o banco e os
+arquivos originais e pode incluir dados pessoais; ele não é criptografado.
+
+```powershell
+python scripts/backup_local.py criar --dados ./data --saida ../backup-docfactory.zip --offline-confirmado
+python scripts/backup_local.py restaurar --arquivo ../backup-docfactory.zip --destino ../dados-restaurados
+```
+
+A restauração exige um diretório novo e verifica os hashes dos arquivos e a
+integridade do SQLite. Teste a restauração separadamente antes de usá-la.
+
+Ao reprocessar um lote com documentos, o sistema preserva um retrato anterior,
+suas revisões e seus PDFs em `GET /lotes/{id}/versoes`. Selecione o lote na
+tela de documentos para comparar. As correções anteriores não são reaplicadas
+automaticamente; o resultado novo precisa de revisão.
+
 ## O que o sistema faz
 
 | Capacidade | Como |
