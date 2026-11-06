@@ -151,6 +151,8 @@ def documentos_do_lote(lote_id: str, db: Session = Depends(get_db), _u: UsuarioA
 def reprocessar(lote_id: str, tudo: bool = False, db: Session = Depends(get_db), _u: UsuarioAtual = Depends(revisor)):
     """Recoloca na fila as páginas que falharam (ou todas, com ?tudo=true)."""
     lote = _obter(db, lote_id)
+    if db.scalar(select(func.count()).select_from(Revisao).where(Revisao.lote_id == lote_id)):
+        raise HTTPException(409, "O lote possui revisões e não pode ser reprocessado sem perder o histórico.")
     cond = [Pagina.lote_id == lote_id]
     if not tudo:
         cond.append(Pagina.status.in_(("erro", "falhou")))

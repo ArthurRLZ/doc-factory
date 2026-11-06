@@ -1,4 +1,5 @@
 """Documentos, fila de revisão humana, auditoria, resumo, vencimentos e busca."""
+import logging
 from datetime import datetime, timedelta
 from typing import Literal
 
@@ -21,6 +22,7 @@ from app.storage import get_storage
 from app.tipos import PRIORIDADES, SETORES, TIPOS, TIPOS_COM_VALIDADE, nome_tipo, setor_do_tipo
 
 router = APIRouter(tags=["documentos"])
+log = logging.getLogger(__name__)
 
 
 def doc_out(d: Documento) -> DocumentoOut:
@@ -158,7 +160,11 @@ def baixar_pdf(doc_id: str, anonimizado: bool = True, db: Session = Depends(get_
     if not key:
         raise HTTPException(404, "PDF ainda não gerado")
     nome = f"{d.ordem + 1:03d}_{d.tipo.lower()}{'_anon' if anonimizado else ''}.pdf"
-    return Response(get_storage().get_bytes(key), media_type="application/pdf",
+    try:
+        conteudo = get_storage().get_bytes(key)
+    except FileNotFoundError as e:
+        raise HTTPException(404, "Arquivo do documento não encontrado no armazenamento") from e
+    return Response(conteudo, media_type="application/pdf",
                     headers={"Content-Disposition": util.content_disposition(nome, inline=True)})
 
 
@@ -196,6 +202,7 @@ def revisar(doc_id: str, r: RevisaoIn, db: Session = Depends(get_db), u: Usuario
     usuario = u.login if u.autenticado else (r.usuario or "anonimo")
     antes = _snapshot(d)
     afetados = [d]
+    arquivos_obsoletos = []
 
     if r.acao == "aprovar":
         d.status_revisao = "revisado"
@@ -245,6 +252,7 @@ def revisar(doc_id: str, r: RevisaoIn, db: Session = Depends(get_db), u: Usuario
             raise HTTPException(422, "Não há documento seguinte para juntar")
         for p in _paginas(db, prox.id):
             p.documento_id = d.id
+        arquivos_obsoletos = [k for k in (prox.pdf_key, prox.pdf_anon_key) if k]
         db.add(Revisao(documento_id=None, lote_id=lote.id, usuario=usuario, acao="removido_por_juncao",
                        antes=_snapshot(prox) | {"id": prox.id}))
         db.delete(prox)
@@ -263,6 +271,11 @@ def revisar(doc_id: str, r: RevisaoIn, db: Session = Depends(get_db), u: Usuario
     db.add(Revisao(documento_id=d.id, lote_id=lote.id, usuario=usuario, acao=r.acao,
                    antes=antes, depois=_snapshot(d)))
     db.commit()
+    for key in arquivos_obsoletos:
+        try:
+            get_storage().delete(key)
+        except Exception:
+            log.exception("Não foi possível remover arquivo obsoleto após junção: %s", key)
     return [doc_out(x) for x in afetados]
 
 
