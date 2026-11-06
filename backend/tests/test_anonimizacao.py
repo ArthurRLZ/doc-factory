@@ -84,3 +84,11 @@ def test_pdf_anonimizado_tarja_nomes(processado):
     assert "SANTOS" in texto(False)                    # original tem o nome
     anon = texto(True)
     assert "SANTOS" not in anon and "FILIA" in anon    # anonimizado: nome some, o rótulo fica
+
+
+def test_titulo_de_documento_nao_vira_nome():
+    """O reconhecedor confundia "CERTIDÃO NEGATIVA" (maiúsculas, começo de linha) com nome de pessoa."""
+    for titulo in ("CERTIDÃO NEGATIVA DE DÉBITOS TRABALHISTAS", "CERTIDÃO NEGATIVA DE DÉBITOS RELATIVOS AOS TRIBUTOS FEDERAIS",
+                   "ATESTADO DE SAÚDE OCUPACIONAL - ASO", "FICHA DE REGISTRO DE EMPREGADO"):
+        m, _ = mascarar_texto(titulo + "\nCliente: Maria Exemplo da Silva")
+        assert m.startswith(titulo) and "Maria" not in m

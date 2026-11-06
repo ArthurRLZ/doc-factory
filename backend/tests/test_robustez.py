@@ -178,3 +178,17 @@ def test_apagar_lote_lgpd(processado):
         assert db.get(Lote, lote["id"]) is None
         reg = db.query(Revisao).filter_by(lote_id=lote["id"], acao="lote_apagado").one()
         assert reg.antes["nome"] == "para_apagar.pdf"                  # auditoria sem dados pessoais
+
+
+def test_titulo_usa_o_titulo_do_tipo():
+    from app.pipeline.resumir import _titulo
+    texto = "Nome: Serviços Gerais Fictícia LTDA, CNPJ [CNPJ]\nCERTIDÃO NEGATIVA DE DÉBITOS TRABALHISTAS\nCertifica-se"
+    assert _titulo(texto, "CNDT") == "CERTIDÃO NEGATIVA DE DÉBITOS TRABALHISTAS"
+    assert _titulo("CONTRATO DE LOCAÇÃO\nCLÁUSULA 1", "TIPO_INEXISTENTE") == "CONTRATO DE LOCAÇÃO"   # cai na regra geral
+
+
+def test_lote_terceiros_titulos_na_tela(lote_terceiros):
+    c, lote = lote_terceiros
+    titulos = {d["tipo"]: d["titulo"] for d in c.get(f"/lotes/{lote['id']}/documentos").json()}
+    assert titulos["CNDT"].upper().startswith("CERTID")
+    assert "TRIBUTOS FEDERAIS" in titulos["CND_FEDERAL"].upper() or titulos["CND_FEDERAL"].upper().startswith("CERTID")

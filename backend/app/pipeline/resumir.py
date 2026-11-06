@@ -17,6 +17,7 @@ from app.config import settings
 from app.llm import obter_llm
 from app.models import Documento, Lote
 from app.pipeline import validade
+from app.pipeline.classificar import _TITULOS, normalizar
 from app.tipos import (
     DESCONHECIDO,
     PRIORIDADE_NOME,
@@ -44,10 +45,15 @@ def _unicos(itens: list[str], limite: int = 5) -> list[str]:
     return vistos[:limite]
 
 
-def _titulo(texto: str) -> str | None:
-    """Primeira linha com cara de título (curta, com letras, sem ser só um marcador)."""
-    for linha in (texto or "").splitlines():
-        linha = linha.strip()
+def _titulo(texto: str, tipo: str | None = None) -> str | None:
+    """Título para a tela: de preferência a linha que bate com o título do próprio tipo (a mesma regra da
+    classificação); senão, a primeira linha com cara de título (curta, com letras, sem ser só um marcador)."""
+    linhas = [ln.strip() for ln in (texto or "").splitlines() if ln.strip()]
+    for rx in _TITULOS.get(tipo or "", []):
+        for linha in linhas[:15]:                    # o título fica no começo do documento
+            if len(linha) <= 120 and rx.search(normalizar(linha)):
+                return linha
+    for linha in linhas:
         if 6 <= len(linha) <= 90 and re.search(r"[A-Za-zÀ-ú]{3}", linha) and not _RX_MARCADOR.match(linha):
             return linha
     return None
@@ -57,7 +63,7 @@ def resumo_simples(tipo: str, texto: str, n_paginas: int) -> tuple[str, dict]:
     datas = _unicos(_RX_DATA.findall(texto or ""))
     valores = _unicos(_RX_VALOR.findall(texto or ""))
     partes = [f"{nome_tipo(tipo)} com {n_paginas} página{'s' if n_paginas != 1 else ''}."]
-    titulo = _titulo(texto)
+    titulo = _titulo(texto, tipo)
     if titulo:
         partes.append(f"Título: “{titulo}”.")
     if datas:
@@ -99,7 +105,7 @@ def _aplicar_validade(doc: Documento, sugestao_modelo: dict | None) -> tuple[str
 def resumir_documento(lote: Lote, doc: Documento) -> None:
     """Preenche título, resumo, campos, validade (com evidência) e prioridade do documento."""
     n_paginas = doc.pagina_fim - doc.pagina_inicio + 1
-    doc.titulo = (_titulo(doc.texto or "") or nome_tipo(doc.tipo))[:200]
+    doc.titulo = (_titulo(doc.texto or "", doc.tipo) or nome_tipo(doc.tipo))[:200]
     resp = None
     if settings.RESUMO_ATIVO:
         llm = obter_llm()
