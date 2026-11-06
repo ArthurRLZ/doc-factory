@@ -20,6 +20,7 @@ import unicodedata
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 
+from app import util
 from app.config import settings
 from app.tipos import TIPOS_COM_VALIDADE, TIPOS_VALIDADE_OBRIGATORIA, regra_validade
 
@@ -180,7 +181,7 @@ def status(data_validade: date | None, tipo: str | None, hoje: date | None = Non
     """(status, dias_restantes) — calculado sempre com a data de hoje."""
     if data_validade is None:
         return ("indeterminado" if tipo in TIPOS_COM_VALIDADE else "sem_validade"), None
-    dias = (data_validade - (hoje or date.today())).days
+    dias = (data_validade - (hoje or util.hoje())).days
     if dias < 0:
         return "vencido", dias
     if dias <= settings.VALIDADE_ALERTA_DIAS:

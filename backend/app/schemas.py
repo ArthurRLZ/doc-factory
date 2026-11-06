@@ -26,6 +26,7 @@ class LoteOut(BaseModel):
     progresso: float = 0.0
     tamanho_bytes: int
     hash_sha256: str
+    alertas: list[dict] | None = None
     prioridade: str = "media"
     enviado_por: str | None = None
     erro: str | None = None
@@ -80,6 +81,8 @@ class DocumentoOut(BaseModel):
     titulo: str | None = None
     validade: ValidadeOut = Field(default_factory=ValidadeOut)
     trabalhador: TrabalhadorRef | None = None    # dono do documento (pela impressão digital do CPF)
+    risco: Literal["confiavel", "atencao", "alto_risco"] = "confiavel"   # sinais de fraude
+    alertas: list[dict] | None = None             # [{codigo, gravidade, mensagem, evidencia}]
     criado_em: datetime | None = None
     pagina_inicio: int
     pagina_fim: int

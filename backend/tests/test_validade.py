@@ -1,9 +1,10 @@
 """Validade / vigência: texto, modelo (com evidência conferida), regra do tipo, status e vencimentos."""
 from datetime import date, timedelta
 
+from app import util
 from app.pipeline import validade as v
 
-HOJE = date.today()
+HOJE = util.hoje()      # mesmo "hoje" do sistema (fuso configurado), não o relógio do servidor
 
 
 def test_data_escrita_no_texto():

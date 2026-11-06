@@ -4,6 +4,8 @@ Com AUTH_ATIVO=false a API fica aberta (modo demo) e estas rotas continuam dispo
 para preparar os usuários antes de ligar o login.
 """
 import logging
+import threading
+import time
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.security import OAuth2PasswordRequestForm
@@ -19,15 +21,48 @@ from app.schemas import CadastroIn, EuOut, TokenOut, UsuarioIn, UsuarioOut
 from app.security import criar_token, hash_senha, verificar_senha
 
 log = logging.getLogger(__name__)
+_HASH_FALSO = hash_senha("senha-que-nunca-confere")
 router = APIRouter(tags=["login e usuários"])
+
+
+# tentativas de login erradas por login: {login: (erros seguidos, bloqueado_até)} — em memória, por processo
+_falhas: dict[str, tuple[int, float]] = {}
+_falhas_lock = threading.Lock()
+
+
+def _verificar_bloqueio(login: str) -> None:
+    with _falhas_lock:
+        erros, ate = _falhas.get(login, (0, 0.0))
+    restante = int(ate - time.monotonic())
+    if restante > 0:
+        raise HTTPException(429, f"Muitas tentativas erradas. Tente de novo em {restante // 60 + 1} minuto(s).",
+                            headers={"Retry-After": str(restante)})
+
+
+def _registrar_falha(login: str) -> None:
+    with _falhas_lock:
+        erros, _ = _falhas.get(login, (0, 0.0))
+        erros += 1
+        ate = time.monotonic() + settings.LOGIN_BLOQUEIO_MIN * 60 if erros >= settings.LOGIN_MAX_TENTATIVAS else 0.0
+        _falhas[login] = (0 if ate else erros, ate)
+    if ate:
+        log.warning("login '%s' bloqueado por %s min após %s tentativas erradas",
+                    login, settings.LOGIN_BLOQUEIO_MIN, settings.LOGIN_MAX_TENTATIVAS)
 
 
 @router.post("/auth/login", response_model=TokenOut)
 def login(form: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
-    """Troca login + senha por um token. No Swagger: botão Authorize."""
+    """Troca login + senha por um token. No Swagger: botão Authorize.
+    Depois de LOGIN_MAX_TENTATIVAS erros seguidos, o login fica bloqueado por LOGIN_BLOQUEIO_MIN minutos."""
+    _verificar_bloqueio(form.username)
     u = db.scalar(select(Usuario).where(Usuario.login == form.username))
-    if not u or not u.ativo or not verificar_senha(form.password, u.senha_hash):
+    # verifica a senha mesmo se o usuário não existir: o tempo de resposta não revela quem existe
+    ok = verificar_senha(form.password, u.senha_hash if u else _HASH_FALSO)
+    if not u or not u.ativo or not ok:
+        _registrar_falha(form.username)
         raise HTTPException(401, "Login ou senha inválidos", headers={"WWW-Authenticate": "Bearer"})
+    with _falhas_lock:
+        _falhas.pop(form.username, None)
     return TokenOut(access_token=criar_token(u.login, u.perfil), perfil=u.perfil)
 
 
@@ -50,6 +85,10 @@ def registrar(dados: CadastroIn, db: Session = Depends(get_db)):
         db.rollback()
         raise HTTPException(409, "Este usuário já está cadastrado")
     return TokenOut(access_token=criar_token(usuario.login, usuario.perfil), perfil=usuario.perfil)
+def _exigir_login_ativo() -> None:
+    if not settings.AUTH_ATIVO:
+        raise HTTPException(403, "Gestão de usuários só com o login ativo (AUTH_ATIVO=true). "
+                                 "Com o login desligado, a API está aberta e qualquer pessoa criaria um admin.")
 
 
 @router.get("/auth/eu", response_model=EuOut)
@@ -67,12 +106,8 @@ def listar_usuarios(
 
 
 @router.post("/usuarios", response_model=UsuarioOut, status_code=201)
-def criar_usuario(
-    dados: UsuarioIn,
-    db: Session = Depends(get_db),
-    _u: UsuarioAtual = Depends(admin),
-    _api_key: None = Depends(exigir_api_key),
-):
+def criar_usuario(dados: UsuarioIn, db: Session = Depends(get_db), _u: UsuarioAtual = Depends(admin)):
+    _exigir_login_ativo()
     if db.scalar(select(Usuario).where(Usuario.login == dados.login)):
         raise HTTPException(409, "Login já existe")
     u = Usuario(login=dados.login, nome=dados.nome, perfil=dados.perfil, senha_hash=hash_senha(dados.senha))
@@ -82,12 +117,8 @@ def criar_usuario(
 
 
 @router.post("/usuarios/{usuario_id}/desativar", response_model=UsuarioOut)
-def desativar_usuario(
-    usuario_id: int,
-    db: Session = Depends(get_db),
-    atual: UsuarioAtual = Depends(admin),
-    _api_key: None = Depends(exigir_api_key),
-):
+def desativar_usuario(usuario_id: int, db: Session = Depends(get_db), atual: UsuarioAtual = Depends(admin)):
+    _exigir_login_ativo()
     u = db.get(Usuario, usuario_id)
     if not u:
         raise HTTPException(404, "Usuário não encontrado")

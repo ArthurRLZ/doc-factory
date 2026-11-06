@@ -144,3 +144,38 @@ O trabalhador é identificado pela **impressão digital do CPF** — o CPF não 
 - `/painel` traz `trabalhadores_irregulares` e um item em `atencao` com `tipo: "trabalhadores_irregulares"`.
 
 Documentos exigidos: `DOCUMENTOS_EXIGIDOS_TRABALHADOR` em `backend/app/tipos.py` (identidade, CTPS, ASO, ficha de EPI).
+
+## Sinais de fraude (veredito com evidência)
+
+Cada documento traz `risco: "confiavel" | "atencao" | "alto_risco"` e `alertas: [{codigo, gravidade (media/alta),
+mensagem, evidencia}]`. Sugestão de selo: Confiável (verde) · Atenção (amarelo) · Alto risco (vermelho), mostrando
+`mensagem` + `evidencia` ao passar o mouse. Códigos: `pdf_editado`, `pdf_modificado`, `repetido`,
+`paginas_misturadas`, `data_futura`, `validade_invertida`. Alto risco já vai para a fila de revisão.
+
+- Filtro: `GET /documentos?risco=alto_risco`. O lote também traz `alertas` (metadados do arquivo enviado).
+- `/painel`: `documentos_suspeitos` e item em `atencao` com `tipo: "fraude"`.
+
+## Aprender com as correções
+
+Toda vez que o revisor usa `alterar_tipo`, o sistema aprende: o título do documento vira regra (vale mesmo sem
+modelo) e o trecho anonimizado vira exemplo para o modelo.
+
+- `GET /aprendizados` → `[{id, titulo, tipo_errado, tipo_certo, usuario, usos, ativo, criado_em}]`
+  (`usos` = quantas páginas já foram decididas por esse aprendizado).
+- `POST /aprendizados/{id}/desativar` (admin) → desfaz uma correção feita por engano.
+
+## Erros e segurança (o que o front deve tratar)
+
+- **500** — erro inesperado: `erro.mensagem` traz um código de ocorrência ("Informe o código 5383630e ao suporte");
+  o detalhe técnico fica só no log do servidor.
+- **401** — sem login / token expirado → mandar para a tela de login.
+- **403** — perfil sem permissão (ex.: analista pedindo o PDF original).
+- **409** — arquivo já enviado (`erro.detalhe.lote_id`) ou lote ainda em processamento.
+- **413 / 415** — arquivo grande demais / tipo não aceito (o conteúdo é conferido, não só a extensão).
+- **429** — login bloqueado por tentativas erradas; respeite o cabeçalho `Retry-After` (segundos).
+
+## Apagar um lote (LGPD — direito de eliminação)
+
+`DELETE /lotes/{id}` (admin) apaga o lote, as páginas, os documentos, os arquivos e as pessoas que ficarem sem
+documento. Responde `{apagado, nome, paginas, documentos}` e deixa só um registro de auditoria sem dados pessoais.
+Lote em processamento → 409.

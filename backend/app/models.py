@@ -6,11 +6,24 @@ ficam no storage (disco/MinIO/S3) e o banco guarda só a chave (key) + hash.
 import uuid
 from datetime import date, datetime, timezone
 
-from sqlalchemy import (DDL, JSON, Boolean, Date, DateTime, Float, ForeignKey, Index,
-                        Integer, String, Text, event)
+from sqlalchemy import (
+    DDL,
+    JSON,
+    Boolean,
+    Date,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    event,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
+from app.status import StatusLote, StatusPagina
 
 
 def agora():
@@ -33,10 +46,11 @@ class Lote(Base):
     tamanho_bytes: Mapped[int] = mapped_column(Integer)
     total_paginas: Mapped[int] = mapped_column(Integer, default=0)
     # recebido → processando → segmentando → concluido | erro
-    status: Mapped[str] = mapped_column(String(20), default="recebido", index=True)
+    status: Mapped[str] = mapped_column(String(20), default=StatusLote.RECEBIDO, index=True)
     erro: Mapped[str | None] = mapped_column(Text)
     # 1 baixa · 2 normal · 3 alta — o worker atende primeiro os lotes de prioridade maior
     prioridade: Mapped[int] = mapped_column(Integer, default=2, server_default="2", index=True)
+    alertas: Mapped[list | None] = mapped_column(JSON)               # sinais de fraude do ARQUIVO (metadados)
     enviado_por: Mapped[str | None] = mapped_column(String(100))
     criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=agora)
     atualizado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=agora, onupdate=agora)
@@ -45,6 +59,17 @@ class Lote(Base):
                                                    order_by="Pagina.numero")
     documentos: Mapped[list["Documento"]] = relationship(back_populates="lote", cascade="all, delete-orphan",
                                                          order_by="Documento.ordem")
+
+
+class VersaoLote(Base):
+    """Retrato anterior ao reprocessamento; inclui documentos, páginas e revisões."""
+    __tablename__ = "versoes_lote"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    lote_id: Mapped[str] = mapped_column(ForeignKey("lotes.id", ondelete="CASCADE"), index=True)
+    usuario: Mapped[str] = mapped_column(String(100))
+    criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=agora)
+    dados: Mapped[dict] = mapped_column(JSON)
 
 
 class Pagina(Base):
@@ -57,7 +82,7 @@ class Pagina(Base):
     documento_id: Mapped[str | None] = mapped_column(ForeignKey("documentos.id", ondelete="SET NULL"), index=True)
 
     # pendente → processando → ok | erro (retenta) → falhou (desistiu)
-    status: Mapped[str] = mapped_column(String(20), default="pendente", index=True)
+    status: Mapped[str] = mapped_column(String(20), default=StatusPagina.PENDENTE, index=True)
     tentativas: Mapped[int] = mapped_column(Integer, default=0)
     erro: Mapped[str | None] = mapped_column(Text)
 
@@ -117,8 +142,13 @@ class Documento(Base):
     # prioridade na fila de revisão: 1 baixa · 2 média · 3 alta
     prioridade: Mapped[int] = mapped_column(Integer, default=2, server_default="2", index=True)
     prioridade_motivo: Mapped[str | None] = mapped_column(String(300))
+    prioridade_manual: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")  # revisor decidiu
     titulo: Mapped[str | None] = mapped_column(String(200))           # título lido no documento (p/ a tela)
     trabalhador_id: Mapped[int | None] = mapped_column(ForeignKey("trabalhadores.id", ondelete="SET NULL"), index=True)
+    # sinais de fraude: confiavel | atencao | alto_risco, com a lista de alertas (código, gravidade, evidência)
+    risco: Mapped[str] = mapped_column(String(20), default="confiavel", server_default="confiavel", index=True)
+    alertas: Mapped[list | None] = mapped_column(JSON)
+    texto_hash: Mapped[str | None] = mapped_column(String(64), index=True)   # detecta documento repetido
 
     # validade / vigência (o status — vigente, vencendo, vencido — é calculado na leitura, com a data de hoje)
     validade_data: Mapped[date | None] = mapped_column(Date, index=True)
@@ -169,6 +199,22 @@ class Revisao(Base):
     em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=agora)
 
     documento: Mapped[Documento | None] = relationship(back_populates="revisoes")
+
+
+class Aprendizado(Base):
+    """O que o sistema aprendeu com uma correção humana de tipo (vira regra e exemplo para o modelo)."""
+    __tablename__ = "aprendizados"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    titulo: Mapped[str] = mapped_column(String(200), index=True)      # título normalizado (sem acento, minúsculo)
+    tipo_errado: Mapped[str | None] = mapped_column(String(50))
+    tipo_certo: Mapped[str] = mapped_column(String(50))
+    exemplo: Mapped[str | None] = mapped_column(Text)                # trecho do texto JÁ anonimizado
+    documento_id: Mapped[str | None] = mapped_column(String(32))
+    usuario: Mapped[str] = mapped_column(String(100))
+    usos: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    ativo: Mapped[bool] = mapped_column(Boolean, default=True)
+    criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=agora)
 
 
 class Configuracao(Base):

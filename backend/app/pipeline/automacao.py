@@ -11,8 +11,10 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.models import Configuracao, Documento, Revisao
+from app.status import StatusRevisao
 
 CHAVE_LIMIAR = "limiar_revisao"
+
 PREFIXO_MOTIVO_LIMIAR = "confiança "         # motivo gerado só pelo limiar (os outros são bloqueantes)
 ACOES_ERRO = {"alterar_tipo", "dividir", "juntar_proximo"}
 LIMIARES = [round(0.50 + 0.05 * i, 2) for i in range(10)] + [0.97, 0.99]
@@ -44,9 +46,9 @@ def definir_limiar(db: Session, limiar: float, usuario: str, aplicar: bool = Tru
     db.add(c)
     mudaram = 0
     if aplicar:
-        for d in db.scalars(select(Documento).where(Documento.status_revisao.in_(("auto_aprovado", "pendente")))):
+        for d in db.scalars(select(Documento).where(Documento.status_revisao.in_((StatusRevisao.AUTO_APROVADO, StatusRevisao.PENDENTE)))):
             outros = motivos_bloqueantes(d)
-            novo = "pendente" if precisa_revisao(d, limiar) else "auto_aprovado"
+            novo = StatusRevisao.PENDENTE if precisa_revisao(d, limiar) else StatusRevisao.AUTO_APROVADO
             motivos = outros or ([f"{PREFIXO_MOTIVO_LIMIAR}{d.confianca:.2f} abaixo do limiar de revisão ({limiar:.2f})"]
                                  if d.confianca < limiar else [])
             if novo != d.status_revisao:

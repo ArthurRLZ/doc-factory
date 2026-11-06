@@ -9,6 +9,7 @@ Layout das chaves:
 import json
 import os
 import shutil
+import tempfile
 from functools import lru_cache
 from pathlib import Path
 
@@ -21,6 +22,7 @@ class Storage:
     def get_bytes(self, key: str) -> bytes: ...
     def caminho_local(self, key: str) -> str: ...     # baixa p/ cache se for remoto
     def delete(self, key: str) -> None: ...
+    def delete_prefixo(self, prefixo: str) -> None: ...   # apaga tudo sob o prefixo (ex.: um lote)
 
     def put_json(self, key: str, obj) -> None:
         self.put_bytes(key, json.dumps(obj, ensure_ascii=False).encode(), "application/json")
@@ -42,12 +44,26 @@ class LocalStorage(Storage):
         return p
 
     def put_file(self, key, caminho):
-        shutil.copyfile(caminho, self._p(key))
+        destino = self._p(key)
+        fd, temporario = tempfile.mkstemp(dir=destino.parent, prefix=".upload-")
+        os.close(fd)
+        try:
+            shutil.copyfile(caminho, temporario)
+            os.replace(temporario, destino)
+        finally:
+            if os.path.exists(temporario):
+                os.unlink(temporario)
 
     def put_bytes(self, key, dados, content_type="application/octet-stream"):
-        tmp = self._p(key).with_suffix(".tmp")
-        tmp.write_bytes(dados)
-        os.replace(tmp, self._p(key))                 # escrita atômica
+        destino = self._p(key)
+        fd, temporario = tempfile.mkstemp(dir=destino.parent, prefix=".arquivo-")
+        try:
+            with os.fdopen(fd, "wb") as f:
+                f.write(dados)
+            os.replace(temporario, destino)
+        finally:
+            if os.path.exists(temporario):
+                os.unlink(temporario)
 
     def get_bytes(self, key):
         return self._p(key).read_bytes()
@@ -57,6 +73,12 @@ class LocalStorage(Storage):
 
     def delete(self, key):
         self._p(key).unlink(missing_ok=True)
+
+    def delete_prefixo(self, prefixo):
+        alvo = (self.raiz / prefixo).resolve()
+        if self.raiz.resolve() not in alvo.parents:
+            raise ValueError("prefixo inválido")
+        shutil.rmtree(alvo, ignore_errors=True)
 
 
 class S3Storage(Storage):
@@ -70,7 +92,7 @@ class S3Storage(Storage):
                                aws_secret_access_key=settings.S3_SECRET_KEY)
         try:
             self.s3.head_bucket(Bucket=self.bucket)
-        except Exception:
+        except Exception:                                  # bucket ainda não existe
             self.s3.create_bucket(Bucket=self.bucket)
         self.cache = Path(settings.DATA_DIR) / "cache"
         self.cache.mkdir(parents=True, exist_ok=True)
@@ -93,6 +115,13 @@ class S3Storage(Storage):
 
     def delete(self, key):
         self.s3.delete_object(Bucket=self.bucket, Key=key)
+
+    def delete_prefixo(self, prefixo):
+        for pagina in self.s3.get_paginator("list_objects_v2").paginate(Bucket=self.bucket, Prefix=prefixo):
+            chaves = [{"Key": o["Key"]} for o in pagina.get("Contents", [])]
+            if chaves:
+                self.s3.delete_objects(Bucket=self.bucket, Delete={"Objects": chaves})
+        shutil.rmtree(self.cache / prefixo, ignore_errors=True)
 
 
 @lru_cache

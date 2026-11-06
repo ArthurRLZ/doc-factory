@@ -7,6 +7,24 @@ monta o dossiê de cada trabalhador sem guardar o CPF e aponta o que falta, o qu
 
 **Guia para o front:** [`API.md`](API.md) — cada tela e componente → rota e campos.
 
+## Cópia e restauração local
+
+Pare a API e todos os workers antes de criar a cópia. O ZIP contém o banco e os
+arquivos originais e pode incluir dados pessoais; ele não é criptografado.
+
+```powershell
+python scripts/backup_local.py criar --dados ./data --saida ../backup-docfactory.zip --offline-confirmado
+python scripts/backup_local.py restaurar --arquivo ../backup-docfactory.zip --destino ../dados-restaurados
+```
+
+A restauração exige um diretório novo e verifica os hashes dos arquivos e a
+integridade do SQLite. Teste a restauração separadamente antes de usá-la.
+
+Ao reprocessar um lote com documentos, o sistema preserva um retrato anterior,
+suas revisões e seus PDFs em `GET /lotes/{id}/versoes`. Selecione o lote na
+tela de documentos para comparar. As correções anteriores não são reaplicadas
+automaticamente; o resultado novo precisa de revisão.
+
 ## O que o sistema faz
 
 | Capacidade | Como |
@@ -21,8 +39,11 @@ monta o dossiê de cada trabalhador sem guardar o CPF e aponta o que falta, o qu
 | Prioridade | tipo + modelo + lote urgente + vencimento; fila de revisão por prioridade e confiança |
 | Meta de automação | limiar ajustável ao vivo, curva automação × revisão, acurácia medida pelas revisões humanas |
 | Revisão humana e auditoria | aprovar, trocar tipo, mudar prioridade, dividir, juntar; trilha com antes/depois |
+| Aprender com correções | cada troca de tipo vira regra (título → tipo, vale sem modelo) e exemplo para o modelo; dá para desativar |
+| Sinais de fraude | PDF editado/modificado, documento repetido em outro lote, páginas misturadas, datas impossíveis → confiável / atenção / alto risco, com evidência |
 | Telas | `/painel`, `/documentos` (filtros e paginação), `/relatorios`, `/trabalhadores`, `/vencimentos`, `.zip` do lote |
-| Login e perfis | JWT, analista < revisor < admin (desligado por padrão para a demo) |
+| Login e perfis | JWT, analista < revisor < admin (desligado por padrão para a demo); bloqueio após 5 senhas erradas |
+| Segurança | modo produção recusa configuração insegura; arquivo conferido pelo conteúdo; erros sem detalhe interno; cabeçalhos de segurança; documento enviado ao modelo como dado (não instrução); `DELETE /lotes/{id}` para eliminação (LGPD) |
 
 **Stack:** FastAPI · PyMuPDF · Tesseract (`por`) · SQLAlchemy (SQLite no dev, PostgreSQL em produção) ·
 storage local ou MinIO/S3 · modelo plugável (qualquer API compatível com OpenAI).
@@ -38,13 +59,14 @@ python scripts/gerar_lote_teste.py lote_teste.pdf       # lote falso de 11 pági
 python scripts/gerar_lote_bernhoeft.py terceiros.pdf    # gestão de terceiros: 14 páginas / 12 documentos
                                                         # (datas relativas a hoje: vencidos, vencendo, vigentes)
 curl -F arquivo=@lote_teste.pdf http://localhost:8000/lotes
-pytest -q                                               # 59 testes, inclui ponta a ponta
+pytest -q                                               # 80 testes, inclui ponta a ponta
 ```
 
 ## Rodar a stack completa
 
 ```bash
-docker compose up --build --scale worker=3              # Postgres + MinIO (console :9001) + API + 3 workers
+# da RAIZ do repositório (docker-compose.yml do projeto):
+docker compose up --build --scale worker=3              # Postgres + API + 3 workers + front em :5173
 ```
 
 ## Estrutura
@@ -78,9 +100,11 @@ app/
     identidade.py         impressão digital do CPF (HMAC) — o CPF não é guardado
     checklist.py          exigidos por trabalhador: faltando, vencido, vencendo, duplicado
     automacao.py          limiar em tempo real, curva e acurácia pelas revisões
+    aprendizado.py        correções humanas → regra por título + exemplos para o modelo
+    fraude.py             sinais de adulteração com veredito e evidência
     orquestrador.py       liga tudo, grava banco/storage
 scripts/gerar_lote_teste.py · gerar_lote_bernhoeft.py
-tests/                 59 testes (pipeline, terceiros, validade, dossiê, telas, automação, anonimização, login)
+tests/                 80 testes (pipeline, terceiros, validade, dossiê, telas, automação, anonimização, login)
 ```
 
 ## Endpoints

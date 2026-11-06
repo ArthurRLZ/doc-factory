@@ -1,3 +1,4 @@
+import hmac
 from dataclasses import dataclass
 
 import jwt
@@ -14,10 +15,9 @@ oauth2 = OAuth2PasswordBearer(tokenUrl="/auth/login", auto_error=False)
 
 
 def exigir_api_key(x_api_key: str | None = Header(default=None)):
-    """Usa a chave no modo demo; com login ativo, as rotas exigem JWT em vez de uma chave compartilhada."""
-    if settings.AUTH_ATIVO:
-        return
-    if settings.API_KEY and x_api_key != settings.API_KEY:
+    """Chave única opcional (integrações máquina-a-máquina). Login com perfis: AUTH_ATIVO=true."""
+    # comparação em tempo constante: não deixa medir pelo tempo de resposta quantos caracteres acertou
+    if settings.API_KEY and not hmac.compare_digest((x_api_key or "").encode(), settings.API_KEY.encode()):
         raise HTTPException(401, "X-API-Key inválida ou ausente")
 
 
@@ -36,8 +36,8 @@ def usuario_atual(token: str | None = Depends(oauth2)) -> UsuarioAtual:
         raise HTTPException(401, "Faça login em /auth/login", headers={"WWW-Authenticate": "Bearer"})
     try:
         dados = ler_token(token)
-    except jwt.PyJWTError:
-        raise HTTPException(401, "Token inválido ou expirado", headers={"WWW-Authenticate": "Bearer"})
+    except jwt.PyJWTError as e:
+        raise HTTPException(401, "Token inválido ou expirado", headers={"WWW-Authenticate": "Bearer"}) from e
     with SessionLocal() as db:
         u = db.scalar(select(Usuario).where(Usuario.login == dados.get("sub")))
         if not u or not u.ativo:
