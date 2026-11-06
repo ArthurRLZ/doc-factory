@@ -112,3 +112,13 @@ def sugerir(db: Session, meta_acuracia: float) -> dict:
             return {"meta": meta_acuracia, "limiar_sugerido": p["limiar"], "ponto": p}
     return {"meta": meta_acuracia, "limiar_sugerido": None, "ponto": None,
             "observacao": "ainda não há revisões suficientes para garantir essa meta; mantenha o limiar atual"}
+
+
+def uso_da_pre_revisao(db: Session) -> dict:
+    """Quantas revisões tinham sugestão da pré-revisão (F2) e em quantas o revisor fez o que foi sugerido."""
+    from app.models import Revisao
+    marcas = [r.get("seguiu_sugestao") for r in db.scalars(select(Revisao.depois)) if isinstance(r, dict)]
+    com = [m for m in marcas if m is not None]
+    seguidas = sum(1 for m in com if m)
+    return {"revisoes_com_sugestao": len(com), "seguidas": seguidas,
+            "percentual": round(100 * seguidas / len(com), 1) if com else None}
