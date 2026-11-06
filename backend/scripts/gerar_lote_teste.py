@@ -13,6 +13,7 @@ Conteúdo (11 páginas → 6 documentos esperados):
 Todos os nomes e números são inventados.
 """
 import io
+import json
 import os
 import random
 import sys
@@ -148,13 +149,46 @@ def pagina(titulo, linhas, rodape, seed) -> bytes:
     return buf.getvalue()
 
 
+# tipo esperado de cada documento, pelo título da 1ª página (a separação sai da própria lista PAGINAS)
+TIPO_DO_TITULO = {
+    "CONTRATO DE PRESTAÇÃO DE SERVIÇOS": "CONTRATO",
+    "CARTEIRA DE IDENTIDADE": "IDENTIDADE",
+    "CONTA DE ENERGIA ELÉTRICA": "COMPROVANTE_RESIDENCIA",
+    "DANFE - DOCUMENTO AUXILIAR DA NOTA FISCAL ELETRÔNICA": "NOTA_FISCAL",
+    "CERTIDÃO DE NASCIMENTO": "CERTIDAO",
+    "CONTRATO DE LOCAÇÃO RESIDENCIAL": "CONTRATO",
+}
+
+
+def montar_gabarito(paginas: list, tipo_do_titulo: dict[str, str], nome: str) -> dict:
+    """Verdade conhecida do lote (F5), derivada da estrutura: título = início de documento,
+    None = continuação, "" = página em branco (separador, não pertence a documento). Páginas 0-based."""
+    docs: list[dict] = []
+    for i, (titulo, _linhas, _rodape) in enumerate(paginas):
+        if titulo == "":
+            continue
+        if titulo is None:
+            docs[-1]["paginas"].append(i)
+        else:
+            docs.append({"tipo": tipo_do_titulo[titulo], "paginas": [i]})
+    return {"lote": nome, "documentos": docs}
+
+
+def salvar_gabarito(saida_pdf: str, gabarito: dict) -> str:
+    caminho = os.path.splitext(saida_pdf)[0] + ".gabarito.json"
+    with open(caminho, "w", encoding="utf-8") as f:
+        json.dump(gabarito, f, ensure_ascii=False, indent=2)
+    return caminho
+
+
 def main(saida: str):
     doc = pymupdf.open()
     for i, (t, ls, r) in enumerate(PAGINAS):
         page = doc.new_page(width=595, height=842)
         page.insert_image(page.rect, stream=pagina(t, ls, r, i))
     doc.save(saida, garbage=4, deflate=True)
-    print(f"{saida}: {doc.page_count} páginas")
+    salvar_gabarito(saida, montar_gabarito(PAGINAS, TIPO_DO_TITULO, os.path.basename(saida)))
+    print(f"{saida}: {doc.page_count} páginas (+ gabarito)")
 
 
 if __name__ == "__main__":

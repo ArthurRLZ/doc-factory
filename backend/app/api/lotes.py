@@ -7,7 +7,7 @@ import os
 import tempfile
 import zipfile
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import Response
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
@@ -19,7 +19,7 @@ from app.config import settings
 from app.db import get_db
 from app.llm import contador
 from app.models import Lote, Pagina, Revisao, Trabalhador, VersaoLote, novo_id
-from app.pipeline import fraude, privacidade, rasterizar
+from app.pipeline import avaliacao, fraude, privacidade, rasterizar
 from app.pipeline.rasterizar import contar_paginas
 from app.schemas import DocumentoOut, LoteOut, PaginaOut
 from app.status import StatusLote, StatusPagina
@@ -247,6 +247,45 @@ def risco_de_privacidade(lote_id: str, limite: int = Query(100, ge=1, le=1000, d
     if lote.status != StatusLote.CONCLUIDO:
         raise HTTPException(409, f"Lote ainda não concluído (status: {lote.status})")
     return privacidade.relatorio_do_lote(db, lote, limite)
+
+
+@router.put("/{lote_id}/gabarito")
+def definir_gabarito(lote_id: str, gabarito: dict = Body(..., examples=[{"lote": "lote_terceiros.pdf", "documentos": [
+                         {"tipo": "ASO", "paginas": [0]}, {"tipo": "CONTRATO", "paginas": [11, 12]}]}]),
+                     db: Session = Depends(get_db), _u: UsuarioAtual = Depends(revisor)):
+    """Grava a verdade conhecida do lote (páginas 0-based) para medir o acerto em GET /lotes/{id}/avaliacao."""
+    lote = _obter(db, lote_id)
+    try:
+        lote.gabarito = avaliacao.validar_gabarito(gabarito, lote.total_paginas)
+    except ValueError as e:
+        raise HTTPException(422, f"Gabarito inválido: {e}") from e
+    db.commit()
+    return {"lote_id": lote.id, "documentos": len(lote.gabarito)}
+
+
+@router.get("/{lote_id}/avaliacao")
+def avaliar_acerto(lote_id: str, db: Session = Depends(get_db), _u: UsuarioAtual = Depends(analista)):
+    """% de acerto contra o gabarito: cortes, documentos exatos, tipo e erros silenciosos (auto-aprovados errados)."""
+    lote = _obter(db, lote_id)
+    if not lote.gabarito:
+        raise HTTPException(409, "Lote sem gabarito")
+    if lote.status != StatusLote.CONCLUIDO:
+        raise HTTPException(409, f"Lote ainda não concluído (status: {lote.status})")
+    revisado = db.scalar(select(func.count()).select_from(Revisao).where(Revisao.lote_id == lote.id)) > 0
+    return {"lote_id": lote.id, "metricas": avaliacao.comparar(lote.gabarito, previstos_do_lote(db, lote)),
+            "com_revisao_humana": revisado,
+            "aviso": ("O lote tem correções humanas; as métricas medem o resultado final, não só a máquina."
+                      if revisado else None)}
+
+
+def previstos_do_lote(db: Session, lote: Lote) -> list[dict]:
+    """Documentos do sistema no formato de avaliacao.comparar (páginas reais de cada documento)."""
+    paginas: dict[str, list[int]] = {}
+    for doc_id, numero in db.execute(select(Pagina.documento_id, Pagina.numero)
+                                     .where(Pagina.lote_id == lote.id, Pagina.documento_id.is_not(None))):
+        paginas.setdefault(doc_id, []).append(numero)
+    return [{"id": d.id, "tipo": d.tipo, "status_revisao": d.status_revisao, "paginas": sorted(paginas.get(d.id, []))}
+            for d in lote.documentos]
 
 
 @router.get("/{lote_id}/zip")

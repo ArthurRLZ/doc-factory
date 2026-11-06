@@ -28,7 +28,7 @@ from datetime import date, timedelta
 import pymupdf
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from gerar_lote_teste import pagina  # noqa: E402  (mesmo visual "escaneado")
+from gerar_lote_teste import montar_gabarito, pagina, salvar_gabarito  # noqa: E402  (mesmo visual "escaneado")
 
 HOJE = date.today()
 
@@ -155,12 +155,27 @@ PAGINAS = [
 ]
 
 
+TIPO_DO_TITULO = {
+    "ATESTADO DE SAÚDE OCUPACIONAL - ASO": "ASO",
+    "FICHA DE ENTREGA DE EPI": "FICHA_EPI",
+    "CERTIFICADO DE TREINAMENTO": "CERTIFICADO_NR",
+    "RECIBO DE PAGAMENTO DE SALÁRIO": "CONTRACHEQUE",
+    "FICHA DE REGISTRO DE EMPREGADO": "CTPS",
+    "CERTIDÃO NEGATIVA DE DÉBITOS RELATIVOS AOS TRIBUTOS FEDERAIS": "CND_FEDERAL",
+    "CERTIFICADO DE REGULARIDADE DO FGTS - CRF": "CRF_FGTS",
+    "CERTIDÃO NEGATIVA DE DÉBITOS TRABALHISTAS": "CNDT",
+    "CONTRATO DE PRESTAÇÃO DE SERVIÇOS": "CONTRATO",
+    "GUIA DO FGTS - FGTS DIGITAL": "GUIA_FGTS",
+}
+
+
 def main(saida: str):
     doc = pymupdf.open()
     for i, (t, ls, r) in enumerate(PAGINAS):
         page = doc.new_page(width=595, height=842)
         page.insert_image(page.rect, stream=pagina(t, ls, r, 100 + i))
     doc.save(saida, garbage=4, deflate=True)
+    salvar_gabarito(saida, montar_gabarito(PAGINAS, TIPO_DO_TITULO, os.path.basename(saida)))
     print(f"{saida}: {doc.page_count} páginas (datas relativas a {HOJE:%d/%m/%Y})")
 
 

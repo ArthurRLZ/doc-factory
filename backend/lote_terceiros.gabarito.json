@@ -1,0 +1,78 @@
+{
+  "lote": "lote_terceiros.pdf",
+  "documentos": [
+    {
+      "tipo": "ASO",
+      "paginas": [
+        0
+      ]
+    },
+    {
+      "tipo": "FICHA_EPI",
+      "paginas": [
+        1
+      ]
+    },
+    {
+      "tipo": "CERTIFICADO_NR",
+      "paginas": [
+        2
+      ]
+    },
+    {
+      "tipo": "CONTRACHEQUE",
+      "paginas": [
+        3
+      ]
+    },
+    {
+      "tipo": "CTPS",
+      "paginas": [
+        4
+      ]
+    },
+    {
+      "tipo": "ASO",
+      "paginas": [
+        5
+      ]
+    },
+    {
+      "tipo": "CERTIFICADO_NR",
+      "paginas": [
+        6
+      ]
+    },
+    {
+      "tipo": "CND_FEDERAL",
+      "paginas": [
+        8
+      ]
+    },
+    {
+      "tipo": "CRF_FGTS",
+      "paginas": [
+        9
+      ]
+    },
+    {
+      "tipo": "CNDT",
+      "paginas": [
+        10
+      ]
+    },
+    {
+      "tipo": "CONTRATO",
+      "paginas": [
+        11,
+        12
+      ]
+    },
+    {
+      "tipo": "GUIA_FGTS",
+      "paginas": [
+        13
+      ]
+    }
+  ]
+}

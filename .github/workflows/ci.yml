@@ -32,6 +32,8 @@ jobs:
         env:
           LLM_PROVIDER: nenhum
         run: pytest -q
+      - name: Acerto contra gabarito (lote de terceiros, só regras)
+        run: python scripts/avaliar_acerto.py lote_terceiros.pdf --sem-llm
 
   frontend:
     runs-on: ubuntu-latest

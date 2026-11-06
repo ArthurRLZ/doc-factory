@@ -60,6 +60,7 @@ class Lote(Base):
     llm_chamadas_resumo: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     llm_chamadas_outras: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     llm_paginas: Mapped[int] = mapped_column(Integer, default=0, server_default="0")   # páginas que consultaram a IA
+    gabarito: Mapped[list | None] = mapped_column(JSON)    # verdade conhecida do lote (F5): [{"tipo","paginas"}]
 
     paginas: Mapped[list["Pagina"]] = relationship(back_populates="lote", cascade="all, delete-orphan",
                                                    order_by="Pagina.numero")
