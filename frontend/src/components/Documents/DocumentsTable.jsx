@@ -1,70 +1,27 @@
 import { FileText, Sparkles } from 'lucide-react';
 
-export default function DocumentsTable() {
-  const documents = [
-    {
-      id: 'DOC-2026-04521',
-      name: 'Notificação 4521',
-      type: 'Notificação judicial',
-      sector: 'Jurídico',
-      date: '08 Nov, 2026',
-      subdate: 'Vence em 2 dias',
-      priority: 'Alta',
-    },
-    {
-      id: 'DOC-2026-01984',
-      name: 'Laudo técnico 77',
-      type: 'Laudo',
-      sector: 'Operações',
-      date: '12 Nov, 2026',
-      subdate: 'Vence em 6 dias',
-      priority: 'Alta',
-    },
-    {
-      id: 'DOC-2026-09823',
-      name: 'NF 98231',
-      type: 'Nota fiscal',
-      sector: 'Financeiro',
-      date: '15 Nov, 2026',
-      subdate: 'Vence em 9 dias',
-      priority: 'Média',
-    },
-    {
-      id: 'DOC-2026-00712',
-      name: 'Contrato Fornecedor X',
-      type: 'Contrato',
-      sector: 'Jurídico',
-      date: '30 Nov, 2026',
-      subdate: 'Vence em 24 dias',
-      priority: 'Média',
-    },
-    {
-      id: 'DOC-2026-00349',
-      name: 'Atestado Maria S.',
-      type: 'Atestado',
-      sector: 'RH',
-      date: '20 Dez, 2026',
-      subdate: 'No prazo',
-      priority: 'Baixa',
-    },
-    {
-      id: 'DOC-2026-00187',
-      name: 'Apólice patrimonial',
-      type: 'Apólice',
-      sector: 'Financeiro',
-      date: '14 Jan, 2027',
-      subdate: 'No prazo',
-      priority: 'Baixa',
-    },
-  ];
+const prioridadeNome = { alta: 'Alta', media: 'Média', baixa: 'Baixa' };
+
+function prazoLabel(validade) {
+  if (!validade) return '—';
+  if (validade.status === 'vencido') return `Vencido há ${Math.abs(validade.dias_restantes)} dias`;
+  if (validade.status === 'vencendo') {
+    return validade.dias_restantes === 0 ? 'Vence hoje' : `Vence em ${validade.dias_restantes} dias`;
+  }
+  if (validade.status === 'vigente') return 'No prazo';
+  if (validade.status === 'indeterminado') return 'Validade não identificada';
+  return 'Sem validade';
+}
+
+export default function DocumentsTable({ documents = [], onSelect }) {
 
   const getPriorityStyle = (priority) => {
     switch (priority) {
-      case 'Alta':
+      case 'alta':
         return 'bg-rose-50 text-rose-600 border-rose-100';
-      case 'Média':
+      case 'media':
         return 'bg-amber-50 text-amber-600 border-amber-100';
-      case 'Baixa':
+      case 'baixa':
         return 'bg-emerald-50 text-emerald-600 border-emerald-100';
       default:
         return 'bg-slate-50 text-slate-600 border-slate-100';
@@ -89,9 +46,9 @@ export default function DocumentsTable() {
             <tr key={doc.id} className="hover:bg-slate-50/80 transition-colors">
               {/* Prioridade */}
               <td className="py-3.5 px-4">
-                <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full font-semibold border ${getPriorityStyle(doc.priority)} text-[11px]`}>
+                <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full font-semibold border ${getPriorityStyle(doc.prioridade)} text-[11px]`}>
                   <span className="w-1.5 h-1.5 rounded-full bg-current" />
-                  {doc.priority}
+                  {prioridadeNome[doc.prioridade] || doc.prioridade}
                 </span>
               </td>
 
@@ -102,8 +59,8 @@ export default function DocumentsTable() {
                     <FileText className="w-4 h-4" />
                   </div>
                   <div>
-                    <p className="font-bold text-slate-800">{doc.name}</p>
-                    <p className="text-[10px] text-slate-400 font-mono">{doc.id}</p>
+                    <p className="font-bold text-slate-800">{doc.titulo || doc.tipo_nome}</p>
+                    <p className="text-[10px] text-slate-400 font-mono">{doc.codigo || doc.id}</p>
                   </div>
                 </div>
               </td>
@@ -111,32 +68,33 @@ export default function DocumentsTable() {
               {/* Tipo */}
               <td className="py-3.5 px-4">
                 <span className="bg-slate-100 text-slate-600 px-2.5 py-1 rounded-md text-[11px] font-medium">
-                  {doc.type}
+                  {doc.tipo_nome}
                 </span>
               </td>
 
               {/* Setor */}
               <td className="py-3.5 px-4 text-slate-600 font-medium">
-                {doc.sector}
+                {doc.setor}
               </td>
 
               {/* Prazo */}
               <td className="py-3.5 px-4">
-                <p className={`font-semibold ${doc.priority === 'Alta' ? 'text-rose-600' : 'text-slate-800'}`}>
-                  {doc.date}
+                <p className={`font-semibold ${doc.prioridade === 'alta' ? 'text-rose-600' : 'text-slate-800'}`}>
+                  {doc.validade?.data ? new Date(`${doc.validade.data}T12:00:00`).toLocaleDateString('pt-BR') : '—'}
                 </p>
-                <p className="text-[10px] text-slate-400">{doc.subdate}</p>
+                <p className="text-[10px] text-slate-400">{prazoLabel(doc.validade)}</p>
               </td>
 
               {/* Ação */}
               <td className="py-3.5 px-4 text-right">
-                <button className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-600 border border-slate-200 rounded-xl px-3 py-1.5 hover:bg-slate-50 hover:text-slate-900 transition-colors">
+                <button onClick={() => onSelect?.(doc)} className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-600 border border-slate-200 rounded-xl px-3 py-1.5 hover:bg-slate-50 hover:text-slate-900 transition-colors">
                   <Sparkles className="w-3.5 h-3.5 text-slate-400" />
                   <span>Ver mais</span>
                 </button>
               </td>
             </tr>
           ))}
+          {!documents.length && <tr><td className="px-4 py-8 text-center text-sm text-slate-400" colSpan="6">Nenhum documento encontrado.</td></tr>}
         </tbody>
       </table>
     </div>

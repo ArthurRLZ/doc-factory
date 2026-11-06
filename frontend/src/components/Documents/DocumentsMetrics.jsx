@@ -1,25 +1,31 @@
 import { FileText, CheckSquare, TrendingUp } from 'lucide-react';
 
-export default function DocumentsMetrics() {
+const numero = new Intl.NumberFormat('pt-BR');
+
+function formatarNumero(valor) {
+  return Number.isFinite(valor) ? numero.format(valor) : '—';
+}
+
+export default function DocumentsMetrics({ data }) {
   const metrics = [
     {
       title: 'Vencem esta semana',
-      value: '12',
-      subtext: '↑ 3 desde ontem',
+      value: formatarNumero(data?.cartoes?.vencem_semana?.valor),
+      subtext: data ? `${formatarNumero(data.cartoes?.vencem_semana?.vencem_hoje)} vencem hoje` : 'Carregando dados',
       icon: FileText,
       iconBg: 'bg-rose-50 text-rose-500',
     },
     {
       title: 'Em revisão',
-      value: '5',
-      subtext: 'Aguardando conferência',
+      value: formatarNumero(data?.cartoes?.aguardando_revisao?.valor),
+      subtext: data ? 'Aguardando conferência' : 'Carregando dados',
       icon: CheckSquare,
       iconBg: 'bg-amber-50 text-amber-500',
     },
     {
       title: 'Processados hoje',
-      value: '148',
-      subtext: '↑ 12% esta semana',
+      value: data ? numero.format(data.processados_hoje) : '—',
+      subtext: data ? 'Processados hoje' : 'Carregando dados',
       icon: TrendingUp,
       iconBg: 'bg-emerald-50 text-emerald-500',
     },
