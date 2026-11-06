@@ -18,6 +18,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
     event,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -60,6 +61,15 @@ class Lote(Base):
     llm_chamadas_resumo: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     llm_chamadas_outras: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     llm_paginas: Mapped[int] = mapped_column(Integer, default=0, server_default="0")   # páginas que consultaram a IA
+    gabarito: Mapped[list | None] = mapped_column(JSON)    # verdade conhecida do lote (F5): [{"tipo","paginas"}]
+    # regras de separação em vigor no upload (F4): [{"texto", "estruturada": [...]}] — reprocessar usa o mesmo retrato
+    regras_aplicadas: Mapped[list | None] = mapped_column(JSON)
+    # portal do fornecedor (F7). convite_id sem FK de propósito: coluna nova em tabela existente (migração leve)
+    origem: Mapped[str] = mapped_column(String(20), default="interno", server_default="interno")
+    convite_id: Mapped[int | None] = mapped_column(Integer)
+    # F8: o arquivo enviado tinha várias folhas numa página → arquivo_key é o PDF normalizado (1 folha por página)
+    arquivo_original_key: Mapped[str | None] = mapped_column(String(512))
+    multidoc: Mapped[list | None] = mapped_column(JSON)               # [{"pagina_original": 0, "recortes": 2}]
 
     paginas: Mapped[list["Pagina"]] = relationship(back_populates="lote", cascade="all, delete-orphan",
                                                    order_by="Pagina.numero")
@@ -176,6 +186,8 @@ class Documento(Base):
     validade_evidencia: Mapped[str | None] = mapped_column(String(500))
     # quem decidiu o tipo: regra | ia | combinado | humano (app/pipeline/explicabilidade.py)
     decidido_por: Mapped[str | None] = mapped_column(String(12))
+    regras_aplicadas: Mapped[list | None] = mapped_column(JSON)       # textos das regras que mudaram a separação
+    pre_revisao: Mapped[dict | None] = mapped_column(JSON)            # explicação + sugestão para o revisor (F2)
     ia_justificativa: Mapped[str | None] = mapped_column(String(500))
     criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=agora)
 
@@ -191,6 +203,11 @@ class Trabalhador(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     cpf_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     cpf_mascarado: Mapped[str] = mapped_column(String(20))           # ***.982.247-**
+    # função/cargo lido nos documentos (F3): define NRs exigidas no checklist
+    funcao: Mapped[str | None] = mapped_column(String(120))           # como está escrito no documento
+    funcao_chave: Mapped[str | None] = mapped_column(String(40))      # chave de FUNCOES_NR, ou None
+    funcao_origem: Mapped[str | None] = mapped_column(String(20))     # texto | ia | manual
+    funcao_evidencia: Mapped[str | None] = mapped_column(String(300))
     criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=agora)
 
     documentos: Mapped[list[Documento]] = relationship(back_populates="trabalhador")
@@ -247,6 +264,65 @@ class Configuracao(Base):
     valor: Mapped[str] = mapped_column(String(500))
     alterado_por: Mapped[str | None] = mapped_column(String(100))
     alterado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=agora, onupdate=agora)
+
+
+class RegraSeparacao(Base):
+    """Regra de separação escrita em português e já convertida para o vocabulário fechado (F4)."""
+    __tablename__ = "regras_separacao"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    texto: Mapped[str] = mapped_column(String(500))
+    estruturada: Mapped[list] = mapped_column(JSON)
+    interpretada_por: Mapped[str] = mapped_column(String(20))          # ia | palavras_chave
+    ativa: Mapped[bool] = mapped_column(Boolean, default=True)
+    criada_por: Mapped[str | None] = mapped_column(String(100))
+    criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=agora)
+
+
+class ContatoAlerta(Base):
+    """Quem recebe o resumo de vencimentos (pessoa da empresa, nunca o trabalhador)."""
+    __tablename__ = "contatos_alerta"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    nome: Mapped[str] = mapped_column(String(120))
+    canal: Mapped[str] = mapped_column(String(20))                    # email | whatsapp
+    destino: Mapped[str] = mapped_column(String(200))                 # e-mail, ou telefone E.164 só dígitos
+    ativo: Mapped[bool] = mapped_column(Boolean, default=True)
+    criado_por: Mapped[str | None] = mapped_column(String(100))
+    criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=agora)
+
+
+class AlertaEnviado(Base):
+    """Um aviso por (documento, contato, canal, faixa): rodar o job várias vezes não repete a mensagem."""
+    __tablename__ = "alertas_enviados"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    documento_id: Mapped[str] = mapped_column(ForeignKey("documentos.id", ondelete="CASCADE"), index=True)
+    contato_id: Mapped[int] = mapped_column(ForeignKey("contatos_alerta.id", ondelete="CASCADE"), index=True)
+    canal: Mapped[str] = mapped_column(String(20))
+    faixa: Mapped[str] = mapped_column(String(10))                    # 30 | 15 | 7 | 1 | vencido
+    status: Mapped[str] = mapped_column(String(20))                   # enviado | simulado | falhou
+    erro: Mapped[str | None] = mapped_column(Text)
+    enviado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=agora)
+
+    __table_args__ = (UniqueConstraint("documento_id", "contato_id", "canal", "faixa", name="uq_alerta_unico"),)
+
+
+class ConviteFornecedor(Base):
+    """Link privado do fornecedor (F7). O token só existe na resposta da criação; aqui fica o sha256 dele."""
+    __tablename__ = "convites_fornecedor"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    fornecedor_nome: Mapped[str] = mapped_column(String(200))
+    contato_email: Mapped[str | None] = mapped_column(String(200))
+    exigidos: Mapped[list] = mapped_column(JSON)                      # tipos ou tokens CERTIFICADO_NR:NR-xx
+    expira_em: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    usos_max: Mapped[int] = mapped_column(Integer, default=20)
+    usos: Mapped[int] = mapped_column(Integer, default=0)
+    ativo: Mapped[bool] = mapped_column(Boolean, default=True)
+    criado_por: Mapped[str | None] = mapped_column(String(100))
+    criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=agora)
 
 
 class Usuario(Base):

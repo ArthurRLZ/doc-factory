@@ -32,6 +32,11 @@ jobs:
         env:
           LLM_PROVIDER: nenhum
         run: pytest -q
+      - name: Acerto contra gabarito (lote de terceiros, só regras)
+        # o PDF não é versionado (*.pdf no .gitignore): gera o lote sintético e o gabarito na hora
+        run: |
+          python scripts/gerar_lote_bernhoeft.py lote_terceiros.pdf
+          python scripts/avaliar_acerto.py lote_terceiros.pdf --sem-llm
 
   frontend:
     runs-on: ubuntu-latest

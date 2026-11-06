@@ -18,7 +18,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 
 from app.config import settings
-from app.tipos import DESCONHECIDO
+from app.tipos import DESCONHECIDO, TIPOS_DO_TRABALHADOR
 
 
 @dataclass
@@ -41,6 +41,7 @@ class DocProposto:
     confianca: float = 0.0
     motivos: list[str] = field(default_factory=list)
     revisao: bool = False
+    regras_aplicadas: list[str] = field(default_factory=list)   # regras de separação que mudaram a decisão
     _cortes: list[float] = field(default_factory=list)
     _infos: list[PaginaInfo] = field(default_factory=list)
 
@@ -65,9 +66,7 @@ def _decidir(p: PaginaInfo, atual: DocProposto | None, forcar_novo: bool) -> tup
     if titulo and p.inicio_llm is False:
         return True, 0.6, f"pág. {p.numero + 1}: título no topo, mas modelo diz continuação"
     # chave identificadora: a página traz o CPF de OUTRA pessoa (impressões sem nenhuma em comum)
-    cpfs_pag = {c["h"] for c in s.get("cpfs", [])}
-    cpfs_doc = {c["h"] for i in atual._infos for c in (i.sinais or {}).get("cpfs", [])}
-    if cpfs_pag and cpfs_doc and not (cpfs_pag & cpfs_doc):
+    if _cpf_diferente(p, atual):
         return True, 0.8, None
     if p.inicio_llm:
         return True, 0.75, None
@@ -81,6 +80,38 @@ def _decidir(p: PaginaInfo, atual: DocProposto | None, forcar_novo: bool) -> tup
     if p.tipo == DESCONHECIDO:
         return False, 0.8, None
     return False, 0.6, f"pág. {p.numero + 1}: tipo diferente com baixa confiança"
+
+
+def _cpf_diferente(p: PaginaInfo, atual: DocProposto) -> bool:
+    cpfs_pag = {c["h"] for c in (p.sinais or {}).get("cpfs", [])}
+    cpfs_doc = {c["h"] for i in atual._infos for c in (i.sinais or {}).get("cpfs", [])}
+    return bool(cpfs_pag and cpfs_doc and not (cpfs_pag & cpfs_doc))
+
+
+def _rotulo_regra(r: dict) -> str:
+    return r.get("texto") or r["op"]
+
+
+def _aplicar_regras(p: PaginaInfo, atual: DocProposto, regras: list[dict]) -> tuple[bool, float, str] | None:
+    """Regras de separação do usuário (F4). None = as regras não opinam (vale a decisão padrão).
+    Precedência: separar_por_pagina > manter_junto > anexar_ao_anterior. Mudança de CPF em documento
+    de trabalhador continua abrindo documento novo: as regras de juntar não passam por cima disso."""
+    x = (p.sinais or {}).get("pagina_x")
+    for r in regras:
+        if r["op"] == "separar_por_pagina" and p.tipo in r["tipos"] and not (x is not None and x > 1):
+            return True, 0.90, _rotulo_regra(r)
+    outro_trabalhador = p.tipo in TIPOS_DO_TRABALHADOR and _cpf_diferente(p, atual)
+    if outro_trabalhador:
+        return None
+    tipo_atual = _tipo_votado(atual._infos)[0]
+    for r in regras:
+        if (r["op"] == "manter_junto" and tipo_atual in r["tipos"]
+                and (p.tipo in r["tipos"] or p.tipo == DESCONHECIDO) and x != 1):
+            return False, 0.90, _rotulo_regra(r)
+    for r in regras:
+        if r["op"] == "anexar_ao_anterior" and p.tipo in r["tipos"] and atual.paginas:
+            return False, 0.85, _rotulo_regra(r)
+    return None
 
 
 def _tipo_votado(infos: list[PaginaInfo]) -> tuple[str, float]:
@@ -118,6 +149,8 @@ def _fechar(doc: DocProposto, limiar: float) -> DocProposto:
         doc.motivos.append("falha no processamento de página")
     if doc.tipo == DESCONHECIDO:
         doc.motivos.append("tipo não identificado")
+    if any((i.sinais or {}).get("sem_texto_para_revisao") for i in doc._infos):
+        doc.motivos.append("Nenhum texto identificado; confira as páginas originais")
 
     doc.confianca = round(conf, 3)
     if doc.confianca < limiar and not doc.motivos:
@@ -126,13 +159,21 @@ def _fechar(doc: DocProposto, limiar: float) -> DocProposto:
     return doc
 
 
-def segmentar(paginas: list[PaginaInfo], limiar: float | None = None) -> list[DocProposto]:
+def segmentar(paginas: list[PaginaInfo], limiar: float | None = None,
+              regras: list[dict] | None = None) -> list[DocProposto]:
+    """regras=None (ou []) ≡ comportamento padrão. Regras: vocabulário de app/pipeline/regras_separacao.py."""
     limiar = settings.LIMIAR_REVISAO if limiar is None else limiar
+    regras = regras or []
+    branco_nao_separa = next((r for r in regras if r["op"] == "branco_nao_separa"), None)
     docs: list[DocProposto] = []
     atual: DocProposto | None = None
     forcar_novo = False
 
     for p in sorted(paginas, key=lambda i: i.numero):
+        if p.em_branco and branco_nao_separa and settings.BRANCO_COMO_SEPARADOR:
+            if atual and _rotulo_regra(branco_nao_separa) not in atual.regras_aplicadas:
+                atual.regras_aplicadas.append(_rotulo_regra(branco_nao_separa))
+            continue  # descartada, mas NÃO fecha o documento aberto
         if p.em_branco and settings.BRANCO_COMO_SEPARADOR:
             if atual:
                 docs.append(_fechar(atual, limiar))
@@ -141,11 +182,20 @@ def segmentar(paginas: list[PaginaInfo], limiar: float | None = None) -> list[Do
             continue  # página separadora não entra em nenhum documento
 
         novo, conf_corte, alerta = _decidir(p, atual, forcar_novo)
+        aplicada = None
+        if regras and atual is not None and not forcar_novo:
+            r = _aplicar_regras(p, atual, regras)
+            if r is not None:
+                if r[0] != novo:
+                    aplicada = r[2]
+                novo, conf_corte, alerta = r[0], r[1], None
         forcar_novo = False
         if novo:
             if atual:
                 docs.append(_fechar(atual, limiar))
             atual = DocProposto()
+        if aplicada and aplicada not in atual.regras_aplicadas:
+            atual.regras_aplicadas.append(aplicada)
         atual.paginas.append(p.numero)
         atual._infos.append(p)
         atual._cortes.append(conf_corte)

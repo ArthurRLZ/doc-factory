@@ -102,17 +102,30 @@ def rodar(uma_vez: bool = False, recuperar_agora: bool = False) -> None:
     init_db()
     with SessionLocal() as db:
         recuperar_travadas(db, tudo=recuperar_agora)
-    ultimo_check = time.monotonic()
+    ultimo_check = ultimo_alerta = time.monotonic()
     while not _parar.is_set():
         with SessionLocal() as db:
             if time.monotonic() - ultimo_check > 30:
                 recuperar_travadas(db)
                 ultimo_check = time.monotonic()
+            if settings.ALERTAS_ATIVO and time.monotonic() - ultimo_alerta > 60:
+                ultimo_alerta = time.monotonic()
+                _alertas_agendados(db)
             trabalhou = ciclo(db)
         if not trabalhou:
             if uma_vez:
                 return
             _parar.wait(settings.WORKER_POLL_S)
+
+
+def _alertas_agendados(db) -> None:
+    """Alertas de vencimento 1x por dia (F6). Nunca derruba o worker."""
+    try:
+        from app.alertas import servico
+        servico.rodar_agendado(db)
+    except Exception:
+        db.rollback()
+        log.exception("falha no agendador de alertas")
 
 
 def iniciar_em_thread() -> threading.Thread:

@@ -19,7 +19,7 @@ class LimiarIn(BaseModel):
 def ver_curva(db: Session = Depends(get_db), _u: UsuarioAtual = Depends(analista)):
     """Para cada limiar: quantos documentos passam sozinhos, quantos vão para revisão e a acurácia
     medida nas revisões humanas (só aparece com amostra suficiente)."""
-    return automacao.curva(db)
+    return automacao.curva(db) | {"pre_revisao": automacao.uso_da_pre_revisao(db)}
 
 
 @router.get("/sugerir")

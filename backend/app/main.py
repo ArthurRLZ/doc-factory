@@ -13,7 +13,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import func, select
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from app.api import auth, automacao, documentos, lotes, painel, trabalhadores
+from app.api import alertas, auth, automacao, documentos, lotes, painel, portal_admin, portal_publico, regras, trabalhadores
 from app.api.deps import UsuarioAtual, analista, exigir_api_key
 from app.config import settings
 from app.db import SessionLocal, init_db
@@ -38,6 +38,11 @@ def problemas_de_seguranca() -> list[str]:
         p.append("CPF_SEGREDO não definido: o segredo da impressão do CPF fica no próprio banco")
     if settings.AUTH_ATIVO and settings.CADASTRO_ABERTO:
         p.append("CADASTRO_ABERTO=true: qualquer pessoa cria uma conta de analista e vê os documentos")
+    if settings.ALERTAS_MODO == "real":
+        from app.alertas import canais
+        if not (canais.email_configurado() or canais.whatsapp_configurado()):
+            p.append("ALERTAS_MODO=real sem canal configurado (SMTP_HOST+SMTP_REMETENTE ou EVOLUTION_URL+"
+                     "EVOLUTION_INSTANCIA+EVOLUTION_APIKEY)")
     if "*" in settings.CORS_ORIGINS:
         p.append("CORS_ORIGINS=*: qualquer site pode chamar a API")
     return p
@@ -84,6 +89,12 @@ app.include_router(automacao.router_aprendizados, dependencies=protegido)
 app.include_router(lotes.router, dependencies=protegido)
 app.include_router(documentos.router, dependencies=protegido)
 app.include_router(trabalhadores.router, dependencies=protegido)
+app.include_router(trabalhadores.router_funcoes, dependencies=protegido)
+app.include_router(regras.router, dependencies=protegido)
+app.include_router(alertas.router, dependencies=protegido)
+# ordem importa: /portal/convites (interno) antes de /portal/{token} (público, autenticação própria pelo token)
+app.include_router(portal_admin.router, dependencies=protegido)
+app.include_router(portal_publico.router)
 
 
 # ------------------------------------------------------------ erros num formato único para o front

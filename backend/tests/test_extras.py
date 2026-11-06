@@ -120,4 +120,6 @@ def test_documentos_trazem_risco_e_filtro(lote_terceiros):
     docs = c.get(f"/lotes/{lote['id']}/documentos").json()
     assert all(d["risco"] == "confiavel" and d["alertas"] == [] for d in docs)       # lote sintético é limpo
     assert c.get("/documentos", params={"lote_id": lote["id"], "risco": "alto_risco"}).json()["total"] == 0
-    assert c.get(f"/lotes/{lote['id']}").json()["alertas"] == []
+    # A página separadora ruidosa pode gerar aviso de leitura, mas não alerta de fraude.
+    alertas_lote = c.get(f"/lotes/{lote['id']}").json()["alertas"]
+    assert all(a['codigo'] == 'paginas_incerto' for a in alertas_lote)

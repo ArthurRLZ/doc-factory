@@ -15,6 +15,7 @@ export default function Documents() {
   const [loteAtivo, setLoteAtivo] = useState('');
   const [erro, setErro] = useState('');
   const [enviando, setEnviando] = useState(false);
+  const [progressoEnvio, setProgressoEnvio] = useState(null);
   const [aberto, setAberto] = useState(null);
   const [corte, setCorte] = useState('');
   const [tipo, setTipo] = useState('');
@@ -25,7 +26,7 @@ export default function Documents() {
       const [l, d, t] = await Promise.all([
         api.get('/lotes'), api.get('/documentos', { params: { q: busca || undefined, lote_id: loteAtivo || undefined, por_pagina: 200 } }), api.get('/tipos'),
       ]);
-      setLotes(l.data); setDocumentos(d.data.itens); setTipos(t.data); setErro('');
+      setLotes(l.data); setDocumentos(d.data.itens); setTipos(t.data);
       if (loteAtivo) {
         try { const v = await api.get(`/lotes/${loteAtivo}/versoes`); setVersoes(v.data); }
         catch { setVersoes([]); }
@@ -44,10 +45,18 @@ export default function Documents() {
     event.target.value = '';
     if (!arquivo) return;
     const dados = new FormData(); dados.append('arquivo', arquivo);
-    setEnviando(true);
-    try { const r = await api.post('/lotes', dados); setLoteAtivo(r.data.id); setAberto(null); await atualizar(); }
-    catch (e) { setErro(e.response?.data?.erro?.mensagem || 'Não foi possível enviar o arquivo.'); }
-    finally { setEnviando(false); }
+    setErro(''); setProgressoEnvio(null); setEnviando(true);
+    try {
+      const r = await api.post('/lotes', dados, {
+        onUploadProgress: ({ loaded, total }) => {
+          if (total > 0) setProgressoEnvio(Math.min(100, Math.floor(loaded * 100 / total)));
+        },
+      });
+      setLoteAtivo(r.data.id); setAberto(null); await atualizar();
+    } catch (e) {
+      setErro(e.response?.status === 413 ? 'O arquivo ultrapassa o limite permitido para envio.' :
+        e.response?.data?.erro?.mensagem || 'Não foi possível enviar o arquivo. Verifique a conexão e tente novamente.');
+    } finally { setEnviando(false); setProgressoEnvio(null); }
   }
 
   async function revisar(acao, extras = {}) {
@@ -71,10 +80,17 @@ export default function Documents() {
           <div><h1 className="text-2xl font-bold text-slate-900">Documentos</h1><p className="text-sm text-slate-500">Envie um lote e acompanhe o processamento.</p></div>
           <label className="cursor-pointer rounded-xl bg-indigo-950 px-4 py-3 text-sm text-white">{enviando ? 'Enviando...' : 'Enviar documentos'}<input className="sr-only" type="file" accept=".pdf,.tif,.tiff,.png,.jpg,.jpeg" onChange={enviar} disabled={enviando} /></label>
         </div>
+        {enviando && <div className="rounded-xl bg-white border border-slate-100 p-4" role="status" aria-live="polite">
+          <p className="text-sm text-slate-700">{progressoEnvio === 100 ? 'Envio concluído. Aguardando confirmação do servidor...' : progressoEnvio === null ? 'Preparando envio...' : `Enviando arquivo: ${progressoEnvio}%`}</p>
+          {progressoEnvio !== null && <progress className="mt-2 w-full" max="100" value={progressoEnvio} aria-label="Progresso do envio" />}
+        </div>}
         {erro && <div role="alert" className="rounded-xl bg-red-50 p-4 text-sm text-red-700">{erro}</div>}
         <section className="rounded-xl bg-white border border-slate-100 p-5"><h2 className="font-bold mb-3">Lotes enviados</h2>
           {lotes.length === 0 ? <p className="text-sm text-slate-500">Nenhum lote enviado.</p> : <div className="space-y-2">{lotes.map(l => <button key={l.id} onClick={() => { setLoteAtivo(l.id); setAberto(null); }} className="w-full text-left rounded-lg bg-slate-50 p-3 text-sm"><strong>{l.nome}</strong> — {l.status} · {l.paginas_processadas}/{l.total_paginas} páginas ({Math.round(l.progresso * 100)}%){l.erro && <span className="block text-red-700">{l.erro}</span>}</button>)}</div>}
         </section>
+        {loteAtivo && lotes.find(l => l.id === loteAtivo)?.alertas?.filter(a => a.codigo === 'paginas_incerto').map(a =>
+          <div key={a.codigo} role="alert" className="rounded-xl bg-amber-50 p-4 text-sm text-amber-800">{a.mensagem} {a.evidencia}</div>
+        )}
         {loteAtivo && <div className="flex flex-wrap gap-2"><button className={button} onClick={() => reprocessar(false)}>Reprocessar páginas com erro</button><button className={button} onClick={() => reprocessar(true)}>Reprocessar lote completo</button></div>}
         {loteAtivo && <RelatorioPrivacidade loteId={loteAtivo} concluido={lotes.find(l => l.id === loteAtivo)?.status === 'concluido'} recarregar={versaoRelatorio} />}
         <section className="rounded-xl bg-white border border-slate-100 p-5 space-y-4"><div className="flex justify-between items-center gap-4"><h2 className="font-bold">Documentos {loteAtivo && 'do lote'}</h2><button className={button} onClick={() => { setLoteAtivo(''); setAberto(null); }}>Todos os lotes</button></div>

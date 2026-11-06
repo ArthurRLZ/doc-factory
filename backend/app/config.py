@@ -62,7 +62,44 @@ class Settings(BaseSettings):
     LLM_MULTIMODAL: bool = True         # envia a imagem (mascarada) junto do texto
     LLM_TIMEOUT: int = 60
     LLM_CUSTO_POR_CHAMADA_BRL: float = 0.0  # custo médio por chamada de IA, só para estimativa na tela (0 = não mostrar R$)
-    FRAUDE_ATENCAO_REVISAO: bool = True     # documento com risco "atencao" também vai para a fila de revisão
+    FRAUDE_ATENCAO_REVISAO: bool = True
+    FUNCAO_EXIGENCIAS_ATIVO: bool = True
+    PRE_REVISAO_ATIVA: bool = True          # documento pendente ganha explicação + sugestão antes do revisor abrir
+    PRE_REVISAO_MAX_POR_LOTE: int = 50      # teto de chamadas de IA de pré-revisão por lote (o resto: por regras)
+
+    # --- Vários documentos numa imagem (F8): detecção por contornos, no upload -------------
+    MULTIDOC_ATIVO: bool = True
+    MULTIDOC_PDF: bool = True               # também em páginas-imagem de PDF escaneado (nunca em PDF com texto)
+    MULTIDOC_AREA_MIN_PCT: float = 8.0      # cada folha precisa ter pelo menos 8% da área da página
+    MULTIDOC_MAX_RECORTES: int = 6          # mais regiões que isso = suspeito, não divide
+    MULTIDOC_DPI_DETECCAO: int = 100
+    MULTIDOC_DPI_RECORTE: int = 300
+    MULTIDOC_MAX_MB: int = 100              # arquivo maior que isso não passa pela detecção (memória)
+
+    # --- Portal do fornecedor (F7): link privado, sem login --------------------------------
+    PORTAL_ATIVO: bool = True
+    PORTAL_URL_BASE: str = "http://localhost:5173"   # o link enviado ao fornecedor é {base}/portal/{token}
+    PORTAL_MAX_UPLOAD_MB: int = 20
+    PORTAL_MAX_PAGINAS: int = 30
+    PORTAL_MAX_ENVIOS_POR_HORA: int = 30   # por link e IP
+    PORTAL_VALIDADE_DIAS: int = 14         # expiração padrão do convite
+    PORTAL_PRIORIDADE: int = 3             # lote do portal passa na frente no worker (veredito rápido)
+
+    # --- Alertas de vencimento (F6): o agendador é o laço do worker --------------------------
+    ALERTAS_ATIVO: bool = False             # liga o envio automático (1x por dia) dentro do worker
+    ALERTAS_MODO: str = "simulado"          # simulado (só registra e loga) | real (envia de verdade)
+    ALERTAS_FAIXAS_DIAS: str = "30,15,7,1"  # avisa ao entrar em cada faixa de dias antes do vencimento
+    ALERTAS_HORA_EXECUCAO: int = 8          # hora local (FUSO_HORAS) a partir da qual roda no dia
+    ALERTAS_URL_PUBLICA: str = "http://localhost:5173"   # base dos links nas mensagens
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 587
+    SMTP_USUARIO: str = ""
+    SMTP_SENHA: str = ""                    # nunca aparece em log nem em resposta da API
+    SMTP_REMETENTE: str = ""
+    SMTP_TLS: bool = True
+    EVOLUTION_URL: str = ""                 # WhatsApp via Evolution API, ex.: http://localhost:8080
+    EVOLUTION_INSTANCIA: str = ""           # instância já conectada ao WhatsApp
+    EVOLUTION_APIKEY: str = ""              # nunca aparece em log nem em resposta da API    # a função lida no ASO/CTPS acrescenta as NRs exigidas ao checklist     # documento com risco "atencao" também vai para a fila de revisão
 
     # --- Validade -----------------------------------------------------------
     VALIDADE_ALERTA_DIAS: int = 30      # vence em até N dias → status "vencendo" (e prioridade alta)
@@ -77,6 +114,19 @@ class Settings(BaseSettings):
     WORKER_POLL_S: float = 1.0
     WORKER_STALE_MIN: int = 2           # página "processando" há mais que isso = worker morreu
     WORKER_INLINE: bool = False         # True = roda o worker numa thread dentro da API (dev/demo)
+
+    @property
+    def alertas_faixas(self) -> list[int]:
+        """"30,15,7,1" → [1, 7, 15, 30] (ordenada, sem repetição, ignora o que não for número positivo)."""
+        faixas = set()
+        for x in self.ALERTAS_FAIXAS_DIAS.split(","):
+            try:
+                n = int(x.strip())
+            except ValueError:
+                continue
+            if n > 0:
+                faixas.add(n)
+        return sorted(faixas)
 
     @property
     def extensoes(self) -> set[str]:

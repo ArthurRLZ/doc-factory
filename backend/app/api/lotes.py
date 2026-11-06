@@ -7,7 +7,7 @@ import os
 import tempfile
 import zipfile
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import Response
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
@@ -17,9 +17,9 @@ from app.api.deps import UsuarioAtual, admin, analista, revisor
 from app.api.documentos import doc_out
 from app.config import settings
 from app.db import get_db
-from app.llm import contador
-from app.models import Lote, Pagina, Revisao, Trabalhador, VersaoLote, novo_id
-from app.pipeline import fraude, privacidade, rasterizar
+from app.llm import contador, obter_llm
+from app.models import ConviteFornecedor, Lote, Pagina, RegraSeparacao, Revisao, Trabalhador, VersaoLote, novo_id
+from app.pipeline import avaliacao, fraude, multidoc, privacidade, rasterizar, regras_separacao
 from app.pipeline.rasterizar import contar_paginas
 from app.schemas import DocumentoOut, LoteOut, PaginaOut
 from app.status import StatusLote, StatusPagina
@@ -57,6 +57,9 @@ def lote_out(db: Session, lote: Lote) -> LoteOut:
     feitas = db.scalar(select(func.count()).select_from(Pagina)
                        .where(Pagina.lote_id == lote.id, Pagina.status.in_((StatusPagina.OK, StatusPagina.FALHOU)))) or 0
     out = LoteOut.model_validate(lote)
+    if lote.convite_id:
+        convite = db.get(ConviteFornecedor, lote.convite_id)
+        out.fornecedor = convite.fornecedor_nome if convite else None
     out.paginas_processadas = feitas
     out.progresso = round(feitas / lote.total_paginas, 3) if lote.total_paginas else 0.0
     return out
@@ -92,6 +95,8 @@ def _validar_arquivo(caminho: str, ext: str) -> int:
 @router.post("", response_model=LoteOut, status_code=201)
 async def criar_lote(arquivo: UploadFile = File(...), nome: str | None = Form(None),
                      prioridade: str = Form("media", description="alta | media | baixa — lotes de prioridade alta são processados primeiro"),
+                     regras: str | None = Form(None, max_length=2000,
+                                               description="regras de separação em português SÓ para este lote"),
                      db: Session = Depends(get_db), u: UsuarioAtual = Depends(analista)):
     prioridade = (prioridade or "media").lower().replace("normal", "media")
     if prioridade not in PRIORIDADES:
@@ -107,37 +112,90 @@ async def criar_lote(arquivo: UploadFile = File(...), nome: str | None = Form(No
         existente = db.scalar(select(Lote).where(Lote.hash_sha256 == digest))
         if existente:
             raise HTTPException(409, {"mensagem": "Este arquivo já foi enviado", "lote_id": existente.id})
-        n = _validar_arquivo(tmp, ext)
-        alertas_arquivo = fraude.analisar_pdf(tmp)        # metadados do PDF (editor, modificação)
-        lote_id = novo_id()
-        key = key_original(lote_id, ext)
-        get_storage().put_file(key, tmp)
+        lote = criar_lote_de_arquivo(db, nome or arquivo.filename or "lote", tmp, ext, digest, tamanho,
+                                     enviado_por=u.login, prioridade=PRIORIDADES[prioridade], regras_texto=regras)
     finally:
         if os.path.exists(tmp):
             os.unlink(tmp)
+    return lote_out(db, lote)
 
-    lote = Lote(id=lote_id, nome=nome or arquivo.filename or "lote", arquivo_key=key, hash_sha256=digest,
+
+def criar_lote_de_arquivo(db: Session, nome: str, caminho: str, ext: str, digest: str, tamanho: int, *,
+                          enviado_por: str | None, prioridade: int, origem: str = "interno",
+                          convite_id: int | None = None, regras_texto: str | None = None,
+                          max_paginas: int | None = None) -> Lote:
+    """Cria o lote a partir de um arquivo já recebido em disco (upload interno e portal do fornecedor usam esta
+    mesma função): confere o conteúdo, conta páginas, guarda no storage, cria o Lote e a fila de páginas.
+    Recebe um caminho e não bytes: lote de 1 GB nunca vai inteiro para a memória."""
+    if not conteudo_confere(caminho, ext):
+        raise HTTPException(415, f"O conteúdo do arquivo não é um {ext.lstrip('.').upper()} de verdade")
+    lote_id = novo_id()
+    original_key, multidoc_info, normalizado = None, None, None
+    if settings.MULTIDOC_ATIVO and tamanho <= settings.MULTIDOC_MAX_MB * 1024 * 1024:
+        with open(caminho, "rb") as f:
+            r = multidoc.normalizar_arquivo(f.read(), f"arquivo{ext}")
+        if r:   # várias folhas numa página: o lote passa a usar o PDF normalizado (o hash segue o do original)
+            original_key = f"lotes/{lote_id}/original_enviado{ext}"
+            get_storage().put_file(original_key, caminho)
+            fd, normalizado = tempfile.mkstemp(suffix=".pdf")
+            with os.fdopen(fd, "wb") as f:
+                f.write(r[0])
+            caminho, ext, tamanho, multidoc_info = normalizado, ".pdf", len(r[0]), r[1]
+    try:
+        return _registrar_lote(db, lote_id, nome, caminho, ext, digest, tamanho, enviado_por=enviado_por,
+                               prioridade=prioridade, origem=origem, convite_id=convite_id, regras_texto=regras_texto,
+                               max_paginas=max_paginas, original_key=original_key, multidoc_info=multidoc_info)
+    finally:
+        if normalizado and os.path.exists(normalizado):
+            os.unlink(normalizado)
+
+
+def _registrar_lote(db: Session, lote_id: str, nome: str, caminho: str, ext: str, digest: str, tamanho: int, *,
+                    enviado_por, prioridade, origem, convite_id, regras_texto, max_paginas, original_key,
+                    multidoc_info) -> Lote:
+    n = _validar_arquivo(caminho, ext)
+    if max_paginas and n > max_paginas:
+        raise HTTPException(422, f"Arquivo com {n} páginas; o limite é {max_paginas}")
+    alertas_arquivo = fraude.analisar_pdf(caminho)        # metadados do PDF (editor, modificação)
+    key = key_original(lote_id, ext)
+    get_storage().put_file(key, caminho)
+    lote = Lote(id=lote_id, nome=nome, arquivo_key=key, hash_sha256=digest,
                 mime=MIMES.get(ext, "application/octet-stream"), tamanho_bytes=tamanho,
-                total_paginas=n, status=StatusLote.PROCESSANDO, prioridade=PRIORIDADES[prioridade],
-                enviado_por=u.login, alertas=alertas_arquivo)
+                total_paginas=n, status=StatusLote.PROCESSANDO, prioridade=prioridade,
+                enviado_por=enviado_por, alertas=alertas_arquivo, origem=origem, convite_id=convite_id,
+                arquivo_original_key=original_key, multidoc=multidoc_info,
+                regras_aplicadas=retrato_das_regras(db, regras_texto))
     db.add(lote)
     db.add_all(Pagina(lote_id=lote_id, numero=i) for i in range(n))   # fila de trabalho = as páginas
     try:
         db.commit()
     except Exception:
         db.rollback()
-        try:
-            get_storage().delete(key)
-        except Exception:
-            import logging
-            logging.getLogger(__name__).exception("Falha ao remover arquivo após erro ao registrar lote")
+        for k in (key, original_key):
+            try:
+                if k:
+                    get_storage().delete(k)
+            except Exception:
+                log.exception("Falha ao remover arquivo após erro ao registrar lote")
         raise
-    return lote_out(db, lote)
+    return lote
 
 
 @router.get("", response_model=list[LoteOut])
 def listar_lotes(db: Session = Depends(get_db), _u: UsuarioAtual = Depends(analista)):
     return [lote_out(db, lt) for lt in db.scalars(select(Lote).order_by(Lote.criado_em.desc()).limit(100))]
+
+
+def retrato_das_regras(db: Session, texto_extra: str | None = None) -> list[dict]:
+    """Regras ativas agora (+ as escritas no upload, só para este lote): o lote guarda o retrato, e reprocessar
+    dá o mesmo resultado mesmo que alguém mude as regras depois."""
+    retrato = [{"texto": r.texto, "estruturada": r.estruturada}
+               for r in db.scalars(select(RegraSeparacao).where(RegraSeparacao.ativa.is_(True)).order_by(RegraSeparacao.id))]
+    if texto_extra and texto_extra.strip():
+        estruturada, _ = regras_separacao.interpretar(texto_extra, obter_llm())
+        if estruturada:
+            retrato.append({"texto": texto_extra.strip()[:500], "estruturada": estruturada})
+    return retrato
 
 
 def _obter(db: Session, lote_id: str) -> Lote:
@@ -163,8 +221,10 @@ def documentos_do_lote(lote_id: str, db: Session = Depends(get_db), _u: UsuarioA
 
 
 @router.post("/{lote_id}/reprocessar", response_model=LoteOut)
-def reprocessar(lote_id: str, tudo: bool = False, db: Session = Depends(get_db), u: UsuarioAtual = Depends(revisor)):
-    """Recoloca na fila as páginas que falharam (ou todas, com ?tudo=true)."""
+def reprocessar(lote_id: str, tudo: bool = False, atualizar_regras: bool = False, db: Session = Depends(get_db),
+                u: UsuarioAtual = Depends(revisor)):
+    """Recoloca na fila as páginas que falharam (ou todas, com ?tudo=true). Usa o retrato de regras de separação
+    do lote; ?atualizar_regras=true troca pelo retrato das regras ativas agora."""
     lote = _obter(db, lote_id)
     if lote.status in ("processando", "segmentando"):
         raise HTTPException(409, "Aguarde o processamento atual terminar.")
@@ -184,7 +244,9 @@ def reprocessar(lote_id: str, tudo: bool = False, db: Session = Depends(get_db),
         })
         db.add(versao)
     numeros = list(db.scalars(select(Pagina.numero).where(*cond)))
-    contador.zerar(db, lote_id, numeros)          # o contador de IA reflete só a última execução
+    contador.zerar(db, lote_id, numeros)
+    if atualizar_regras:
+        lote.regras_aplicadas = retrato_das_regras(db)          # o contador de IA reflete só a última execução
     db.execute(update(Pagina).where(*cond).values(status=StatusPagina.PENDENTE, tentativas=0, erro=None))
     lote.status, lote.erro = StatusLote.PROCESSANDO, None
     db.commit()
@@ -247,6 +309,45 @@ def risco_de_privacidade(lote_id: str, limite: int = Query(100, ge=1, le=1000, d
     if lote.status != StatusLote.CONCLUIDO:
         raise HTTPException(409, f"Lote ainda não concluído (status: {lote.status})")
     return privacidade.relatorio_do_lote(db, lote, limite)
+
+
+@router.put("/{lote_id}/gabarito")
+def definir_gabarito(lote_id: str, gabarito: dict = Body(..., examples=[{"lote": "lote_terceiros.pdf", "documentos": [
+                         {"tipo": "ASO", "paginas": [0]}, {"tipo": "CONTRATO", "paginas": [11, 12]}]}]),
+                     db: Session = Depends(get_db), _u: UsuarioAtual = Depends(revisor)):
+    """Grava a verdade conhecida do lote (páginas 0-based) para medir o acerto em GET /lotes/{id}/avaliacao."""
+    lote = _obter(db, lote_id)
+    try:
+        lote.gabarito = avaliacao.validar_gabarito(gabarito, lote.total_paginas)
+    except ValueError as e:
+        raise HTTPException(422, f"Gabarito inválido: {e}") from e
+    db.commit()
+    return {"lote_id": lote.id, "documentos": len(lote.gabarito)}
+
+
+@router.get("/{lote_id}/avaliacao")
+def avaliar_acerto(lote_id: str, db: Session = Depends(get_db), _u: UsuarioAtual = Depends(analista)):
+    """% de acerto contra o gabarito: cortes, documentos exatos, tipo e erros silenciosos (auto-aprovados errados)."""
+    lote = _obter(db, lote_id)
+    if not lote.gabarito:
+        raise HTTPException(409, "Lote sem gabarito")
+    if lote.status != StatusLote.CONCLUIDO:
+        raise HTTPException(409, f"Lote ainda não concluído (status: {lote.status})")
+    revisado = db.scalar(select(func.count()).select_from(Revisao).where(Revisao.lote_id == lote.id)) > 0
+    return {"lote_id": lote.id, "metricas": avaliacao.comparar(lote.gabarito, previstos_do_lote(db, lote)),
+            "com_revisao_humana": revisado,
+            "aviso": ("O lote tem correções humanas; as métricas medem o resultado final, não só a máquina."
+                      if revisado else None)}
+
+
+def previstos_do_lote(db: Session, lote: Lote) -> list[dict]:
+    """Documentos do sistema no formato de avaliacao.comparar (páginas reais de cada documento)."""
+    paginas: dict[str, list[int]] = {}
+    for doc_id, numero in db.execute(select(Pagina.documento_id, Pagina.numero)
+                                     .where(Pagina.lote_id == lote.id, Pagina.documento_id.is_not(None))):
+        paginas.setdefault(doc_id, []).append(numero)
+    return [{"id": d.id, "tipo": d.tipo, "status_revisao": d.status_revisao, "paginas": sorted(paginas.get(d.id, []))}
+            for d in lote.documentos]
 
 
 @router.get("/{lote_id}/zip")

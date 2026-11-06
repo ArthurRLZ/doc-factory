@@ -1,4 +1,4 @@
-# Versões fixas (testadas juntas: 83 testes). Para atualizar: mude aqui, rode `pytest -q` e só então suba.
+# Versões fixas (testadas juntas). Para atualizar: mude aqui, rode `pytest -q` e só então suba.
 fastapi==0.162.0
 uvicorn[standard]==0.54.0
 python-multipart==0.0.33
@@ -7,6 +7,9 @@ pydantic-settings==2.16.2
 pymupdf==2.1
 pytesseract==0.3.13
 pillow==13.0.0
+# separar vários documentos fotografados numa mesma imagem (F8)
+opencv-python-headless==5.0.0.93
+numpy==2.5.4
 httpx==0.28.1
 PyJWT==2.15.1
 # anonimização de nomes (reconhecedor de entidades em português)

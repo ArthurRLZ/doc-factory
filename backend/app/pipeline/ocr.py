@@ -23,6 +23,7 @@ class ResultadoOCR:
     palavras: list[dict]       # {x0,y0,x1,y1 (em pontos PDF), t, c (0-100), b (bloco), l (linha)}
     confianca: float           # média ponderada pelo tamanho da palavra
     tinta: float               # fração de pixels escuros (detecta página em branco)
+    conteudo_incerto: bool = False
 
 
 def preprocessar(img: Image.Image) -> Image.Image:
@@ -41,14 +42,33 @@ def ocr_png(png: bytes, dpi: int | None = None) -> ResultadoOCR:
     dpi = dpi or settings.DPI_OCR
     bruta = Image.open(io.BytesIO(png)).convert("L")
     tinta = densidade_tinta(bruta)          # ANTES do autocontraste (que escurece páginas vazias)
-    if tinta < LIMIAR_TINTA_VAZIA:
-        # página praticamente vazia: nem chama o Tesseract (ele pode travar com ruído puro)
+    # Traços cinza-claro também são conteúdo potencial, mesmo sem pixels abaixo de 128.
+    if tinta == 0 and bruta.getextrema()[0] < 245:
+        tinta = 1 / (bruta.width * bruta.height)
+    if tinta == 0:
+        # Apenas branco uniforme é inequívoco; texto pequeno pode ocupar área mínima.
         return ResultadoOCR(texto="", palavras=[], confianca=0.0, tinta=tinta)
+    desloc_x = desloc_y = 0
+    if tinta < LIMIAR_TINTA_VAZIA:
+        # Conteúdo esparso numa imagem grande: recortar a área escura impede que
+        # o Tesseract ignore texto pequeno cercado por uma grande margem branca.
+        caixa = bruta.point(lambda pixel: 255 if pixel < 128 else 0).getbbox()
+        if not caixa:
+            caixa = bruta.point(lambda pixel: 255 if pixel < 245 else 0).getbbox()
+        if caixa:
+            margem = 24
+            x0, y0, x1, y1 = caixa
+            # Poeira distribuída pela página inteira não forma uma região útil:
+            # evita que o Tesseract transforme ruído de scanner em palavras fictícias.
+            if (x1 - x0) * (y1 - y0) > bruta.width * bruta.height * 0.5:
+                return ResultadoOCR(texto="", palavras=[], confianca=0.0, tinta=0.0, conteudo_incerto=True)
+            desloc_x, desloc_y = max(0, x0 - margem), max(0, y0 - margem)
+            bruta = bruta.crop((desloc_x, desloc_y, min(bruta.width, x1 + margem), min(bruta.height, y1 + margem)))
     img = preprocessar(bruta)
 
     try:
         d = pytesseract.image_to_data(
-            img, lang=settings.OCR_LANG, config=f"--psm {settings.OCR_PSM}",
+            img, lang=settings.OCR_LANG, config=f"--psm {6 if tinta < LIMIAR_TINTA_VAZIA else settings.OCR_PSM}",
             output_type=pytesseract.Output.DICT, timeout=settings.OCR_TIMEOUT_S,
         )
     except RuntimeError as e:  # pytesseract levanta RuntimeError no timeout
@@ -62,7 +82,7 @@ def ocr_png(png: bytes, dpi: int | None = None) -> ResultadoOCR:
         conf = float(d["conf"][i])
         if not t or conf < 0:
             continue
-        x, y, w, h = d["left"][i], d["top"][i], d["width"][i], d["height"][i]
+        x, y, w, h = d["left"][i] + desloc_x, d["top"][i] + desloc_y, d["width"][i], d["height"][i]
         bloco, linha = d["block_num"][i], (d["block_num"][i], d["par_num"][i], d["line_num"][i])
         palavras.append({"x0": x * escala, "y0": y * escala, "x1": (x + w) * escala, "y1": (y + h) * escala,
                          "t": t, "c": conf, "b": bloco, "l": d["line_num"][i]})
@@ -85,4 +105,6 @@ def ocr_png(png: bytes, dpi: int | None = None) -> ResultadoOCR:
 def e_pagina_em_branco(n_palavras: int, tinta: float) -> bool:
     # poucas palavras E quase nenhuma tinta (tolera sujeira de scanner).
     # Calibrem com os dados reais: no lote sintético, páginas com texto ficam entre 0,6% e 1,6% de tinta.
-    return n_palavras < 3 and tinta < 0.003
+    # Uma única palavra reconhecida não deve ser descartada como separador.
+    # Qualquer conteúdo escuro sem texto é ambíguo e precisa de revisão.
+    return n_palavras == 0 and tinta == 0

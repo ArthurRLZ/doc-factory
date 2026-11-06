@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.llm import contador, obter_llm
 from app.models import Documento, Lote, Pagina, Trabalhador, VersaoLote, agora
-from app.pipeline import aprendizado, fraude, identidade, rasterizar
+from app.pipeline import aprendizado, fraude, funcao, identidade, pre_revisao, rasterizar
 from app.pipeline.explicabilidade import decidido_por
 from app.pipeline.anonimizar import indices_sensiveis, mascarar_texto, tarjar_imagem
 from app.pipeline.automacao import obter_limiar
@@ -66,12 +66,15 @@ def processar_pagina(db: Session, pagina_id: int) -> None:
 
     # 3. classificação + sinais de início
     if em_branco:
-        p.tipo, p.confianca, p.tipo_regra, p.conf_regra, p.sinais = DESCONHECIDO, 0.0, DESCONHECIDO, 0.0, {}
+        p.tipo, p.confianca, p.tipo_regra, p.conf_regra = DESCONHECIDO, 0.0, DESCONHECIDO, 0.0
+        p.sinais = {"conteudo_incerto": True} if not r.nativa and o.conteudo_incerto else {}
     else:
         topo = texto_do_topo(palavras, r.altura_pt)
         regra = classificar_por_regras(texto or "", topo, aprendizado.regras(db))
         p.tipo_regra, p.conf_regra = regra.tipo, regra.confianca
         p.sinais = sinais_de_inicio(texto or "", topo) | {"scores": regra.scores}
+        if not texto or not texto.strip():
+            p.sinais = p.sinais | {"sem_texto_para_revisao": True}
         if regra.aprendizado_id:            # uma correção humana anterior decidiu esta página
             p.sinais = p.sinais | {"aprendizado": regra.aprendizado_id}
             aprendizado.contar_uso(db, regra.aprendizado_id)
@@ -119,6 +122,13 @@ def finalizar_lote_se_pronto(db: Session, lote_id: str) -> bool:
     lote = db.get(Lote, lote_id)
     try:
         segmentar_e_montar(db, lote)
+        incertas = [p.numero + 1 for p in lote.paginas if (p.sinais or {}).get("conteudo_incerto")]
+        alertas = [a for a in (lote.alertas or []) if a.get("codigo") != "paginas_incerto"]
+        if incertas:
+            alertas.append({"codigo": "paginas_incerto", "gravidade": "media",
+                            "mensagem": "Possível conteúdo em páginas consideradas separadoras; confira o arquivo original.",
+                            "evidencia": "Páginas: " + ", ".join(map(str, incertas))})
+        lote.alertas = alertas
         falhas = db.scalar(select(func.count()).select_from(Pagina).where(
             Pagina.lote_id == lote_id, Pagina.status == StatusPagina.FALHOU)) or 0
         if falhas:
@@ -153,15 +163,24 @@ def segmentar_e_montar(db: Session, lote: Lote) -> None:
                         ocr_conf=p.ocr_confianca if p.ocr_confianca is not None else 0.0,
                         inicio_llm=p.inicio_llm, sinais=p.sinais or {})
              for p in lote.paginas]
+    # Mesmo um lote inteiramente branco precisa ser visível para revisão humana.
+    # Caso contrário a segmentação descartaria todas as páginas e indicaria sucesso vazio.
+    if infos and all(p.em_branco for p in infos):
+        for p in infos:
+            p.em_branco = False
+            p.sinais = {**(p.sinais or {}), "sem_texto_para_revisao": True}
     por_numero = {p.numero: p for p in lote.paginas}
 
     novos = []
     try:
-        for ordem, dp in enumerate(segmentar(infos, obter_limiar(db))):
+        regras = [dict(r, texto=item.get("texto")) for item in (lote.regras_aplicadas or [])
+                  for r in item.get("estruturada", [])]
+        for ordem, dp in enumerate(segmentar(infos, obter_limiar(db), regras)):
             doc = Documento(lote_id=lote.id, ordem=ordem, tipo=dp.tipo,
                             pagina_inicio=min(dp.paginas), pagina_fim=max(dp.paginas),
                             confianca=dp.confianca, motivos=dp.motivos,
-                            status_revisao=StatusRevisao.PENDENTE if dp.revisao else StatusRevisao.AUTO_APROVADO)
+                            status_revisao=StatusRevisao.PENDENTE if dp.revisao else StatusRevisao.AUTO_APROVADO,
+                            regras_aplicadas=dp.regras_aplicadas or None)
             db.add(doc)
             db.flush()
             novos.extend((key_documento(lote.id, doc.id), key_documento(lote.id, doc.id, anon=True)))
@@ -174,6 +193,9 @@ def segmentar_e_montar(db: Session, lote: Lote) -> None:
             doc.decidido_por, doc.ia_justificativa = decidido_por(pags, doc.tipo)
             db.flush()
             fraude.aplicar(db, lote, doc, pags)
+        db.flush()
+        _atualizar_funcoes(db, lote)
+        _pre_revisar(db, lote, por_numero)
         db.commit()
     except Exception:
         db.rollback()
@@ -188,6 +210,33 @@ def segmentar_e_montar(db: Session, lote: Lote) -> None:
             st.delete(key)
         except Exception:
             log.exception("Falha ao remover arquivo antigo após segmentação: %s", key)
+
+
+def _pre_revisar(db: Session, lote: Lote, por_numero: dict[int, Pagina]) -> None:
+    """Pendentes ganham explicação + sugestão (F2). Passado o teto de chamadas por lote, só por regras."""
+    if not settings.PRE_REVISAO_ATIVA:
+        return
+    llm, usadas = obter_llm(), 0
+    pendentes = db.scalars(select(Documento).where(Documento.lote_id == lote.id,
+                                                   Documento.status_revisao == StatusRevisao.PENDENTE)
+                           .order_by(Documento.ordem))
+    for doc in pendentes:
+        pags = [por_numero[n] for n in range(doc.pagina_inicio, doc.pagina_fim + 1) if n in por_numero]
+        usar_ia = usadas < settings.PRE_REVISAO_MAX_POR_LOTE
+        consulta_ia = (usar_ia and getattr(llm, "pre_revisar", None) is not None and bool((doc.texto or "").strip()))
+        doc.pre_revisao = pre_revisao.gerar(db, lote, doc, pags, llm, usar_ia)
+        usadas += consulta_ia
+
+
+def _atualizar_funcoes(db: Session, lote: Lote) -> None:
+    """Função de cada trabalhador tocado no lote (F3): define as NRs exigidas no checklist."""
+    # consulta direta: as coleções em memória (lote.documentos, t.documentos) podem estar desatualizadas aqui
+    ids = set(db.scalars(select(Documento.trabalhador_id).where(Documento.lote_id == lote.id,
+                                                               Documento.trabalhador_id.is_not(None))))
+    llm = obter_llm()
+    for t in db.scalars(select(Trabalhador).where(Trabalhador.id.in_(ids))) if ids else []:
+        docs = list(db.scalars(select(Documento).where(Documento.trabalhador_id == t.id)))
+        funcao.atualizar_funcao(db, t, docs, llm, lote.id)
 
 
 def atribuir_trabalhador(db: Session, doc: Documento, paginas: list[Pagina]) -> None:
