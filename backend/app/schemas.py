@@ -88,6 +88,14 @@ class DocumentoOut(BaseModel):
     _p = field_validator("prioridade", mode="before")(_prioridade_texto)
 
 
+class PaginaDocumentos(BaseModel):
+    total: int
+    pagina: int
+    por_pagina: int
+    paginas: int
+    itens: list[DocumentoOut]
+
+
 class RevisaoIn(BaseModel):
     acao: Literal["aprovar", "alterar_tipo", "dividir", "juntar_proximo", "alterar_prioridade"]
     usuario: str | None = Field(default=None, max_length=100)   # com login ativo vem do token

@@ -1,9 +1,10 @@
 """Documentos, fila de revisão humana, auditoria, resumo, vencimentos e busca."""
 from datetime import date, datetime, timedelta
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
-from sqlalchemy import func, literal_column, select, update
+from sqlalchemy import and_, func, literal_column, or_, select, update
 from sqlalchemy.orm import Session
 
 from app.api.deps import UsuarioAtual, analista, revisor
@@ -12,9 +13,11 @@ from app.models import Documento, Pagina, Revisao
 from app.pipeline import validade
 from app.pipeline.orquestrador import gerar_arquivos
 from app.pipeline.resumir import nome_prioridade, resumir_documento
-from app.schemas import BuscaItem, DocumentoOut, Prioridade, RevisaoIn, RevisaoOut, ValidadeOut
+from app.config import settings
+from app.schemas import (BuscaItem, DocumentoOut, PaginaDocumentos, Prioridade, RevisaoIn, RevisaoOut,
+                         ValidadeOut)
 from app.storage import get_storage
-from app.tipos import PRIORIDADES, TIPOS, nome_tipo, setor_do_tipo
+from app.tipos import PRIORIDADES, SETORES, TIPOS, TIPOS_COM_VALIDADE, nome_tipo, setor_do_tipo
 
 router = APIRouter(tags=["documentos"])
 
@@ -54,23 +57,67 @@ def listar_tipos(_u: UsuarioAtual = Depends(analista)):
              "validade": t.get("validade")} for c, t in TIPOS.items()]
 
 
-@router.get("/documentos", response_model=list[DocumentoOut])
-def listar_documentos(tipo: str | None = None, status_revisao: str | None = None,
-                      prioridade: Prioridade | None = None, lote_id: str | None = None,
-                      limite: int = 100, deslocamento: int = 0,
+Prazo = Literal["vencido", "vencendo", "vigente", "indeterminado", "sem_validade", "esta_semana"]
+Ordem = Literal["recentes", "prazo", "prioridade", "confianca"]
+
+
+@router.get("/documentos", response_model=PaginaDocumentos)
+def listar_documentos(tipo: str | None = None, setor: str | None = None, prioridade: Prioridade | None = None,
+                      status_revisao: str | None = None, prazo: Prazo | None = None, lote_id: str | None = None,
+                      q: str | None = None, ordenar: Ordem = "recentes", pagina: int = 1, por_pagina: int = 20,
                       db: Session = Depends(get_db), _u: UsuarioAtual = Depends(analista)):
-    """Lista documentos de todos os lotes, com filtros. Mais recentes primeiro."""
-    q = select(Documento)
+    """Lista documentos de todos os lotes — filtros da tela "Documentos" (setor, prioridade, tipo, prazo e busca).
+
+    prazo: vencido | vencendo (até VALIDADE_ALERTA_DIAS) | esta_semana (até 7 dias) | vigente | indeterminado | sem_validade
+    ordenar: recentes | prazo (vence primeiro) | prioridade (alta primeiro) | confianca (menor primeiro)
+    """
+    hoje = date.today()
+    cond = []
     if tipo:
-        q = q.where(Documento.tipo == tipo)
-    if status_revisao:
-        q = q.where(Documento.status_revisao == status_revisao)
+        cond.append(Documento.tipo == tipo)
+    if setor:
+        cond.append(Documento.tipo.in_([t for t, s in SETORES.items() if s == setor] or ["__nenhum__"]))
     if prioridade:
-        q = q.where(Documento.prioridade == PRIORIDADES[prioridade])
+        cond.append(Documento.prioridade == PRIORIDADES[prioridade])
+    if status_revisao:
+        cond.append(Documento.status_revisao == status_revisao)
     if lote_id:
-        q = q.where(Documento.lote_id == lote_id)
-    q = q.order_by(Documento.criado_em.desc(), Documento.ordem).offset(max(0, deslocamento)).limit(min(max(1, limite), 500))
-    return [doc_out(d) for d in db.scalars(q)]
+        cond.append(Documento.lote_id == lote_id)
+    if q and q.strip():
+        termo = f"%{q.strip()}%"
+        cond.append(or_(Documento.titulo.ilike(termo), Documento.texto.ilike(termo), Documento.resumo.ilike(termo),
+                        Documento.tipo.ilike(termo)))
+    if prazo:
+        data, alerta = Documento.validade_data, hoje + timedelta(days=settings.VALIDADE_ALERTA_DIAS)
+        cond.append({
+            "vencido": data < hoje,
+            "vencendo": and_(data >= hoje, data <= alerta),
+            "esta_semana": and_(data >= hoje, data <= hoje + timedelta(days=7)),
+            "vigente": data > alerta,
+            "indeterminado": and_(data.is_(None), Documento.tipo.in_(TIPOS_COM_VALIDADE)),
+            "sem_validade": and_(data.is_(None), Documento.tipo.not_in(TIPOS_COM_VALIDADE)),
+        }[prazo])
+    total = db.scalar(select(func.count()).select_from(Documento).where(*cond)) or 0
+    ordem = {
+        "recentes": (Documento.criado_em.desc(), Documento.ordem),
+        "prazo": (Documento.validade_data.is_(None), Documento.validade_data, Documento.criado_em.desc()),
+        "prioridade": (Documento.prioridade.desc(), Documento.confianca.asc()),
+        "confianca": (Documento.confianca.asc(),),
+    }[ordenar]
+    pagina, por_pagina = max(1, pagina), min(max(1, por_pagina), 200)
+    itens = db.scalars(select(Documento).where(*cond).order_by(*ordem)
+                       .offset((pagina - 1) * por_pagina).limit(por_pagina))
+    return PaginaDocumentos(total=total, pagina=pagina, por_pagina=por_pagina,
+                            paginas=max(1, -(-total // por_pagina)), itens=[doc_out(d) for d in itens])
+
+
+@router.get("/setores")
+def listar_setores(_u: UsuarioAtual = Depends(analista)):
+    """Setores para o filtro da tela, com os tipos de cada um."""
+    por_setor: dict[str, list[str]] = {}
+    for t, s in SETORES.items():
+        por_setor.setdefault(s, []).append(t)
+    return [{"setor": s, "tipos": ts} for s, ts in por_setor.items()]
 
 
 @router.get("/vencimentos", response_model=list[DocumentoOut])

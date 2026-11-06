@@ -144,8 +144,8 @@ def test_alterar_prioridade_gera_auditoria(processado):
 def test_listar_documentos_com_filtros(processado):
     c, lote = processado
     contratos = c.get("/documentos", params={"tipo": "CONTRATO", "lote_id": lote["id"]}).json()
-    assert len(contratos) == 2 and all(d["tipo"] == "CONTRATO" for d in contratos)
-    baixas = c.get("/documentos", params={"prioridade": "baixa", "lote_id": lote["id"]}).json()
+    assert contratos["total"] == 2 and all(d["tipo"] == "CONTRATO" for d in contratos["itens"])
+    baixas = c.get("/documentos", params={"prioridade": "baixa", "lote_id": lote["id"]}).json()["itens"]
     assert all(d["prioridade"] == "baixa" for d in baixas)
 
 

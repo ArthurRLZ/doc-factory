@@ -6,10 +6,13 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from sqlalchemy import func, select
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from app.api import auth, documentos, lotes
+from app.api import auth, documentos, lotes, painel
 from app.api.deps import UsuarioAtual, analista, exigir_api_key
 from app.config import settings
 from app.db import SessionLocal, init_db
@@ -41,8 +44,31 @@ app.add_middleware(CORSMiddleware, allow_origins=[o.strip() for o in settings.CO
 
 protegido = [Depends(exigir_api_key)]
 app.include_router(auth.router, dependencies=protegido)
+app.include_router(painel.router, dependencies=protegido)
 app.include_router(lotes.router, dependencies=protegido)
 app.include_router(documentos.router, dependencies=protegido)
+
+
+# ------------------------------------------------------------ erros num formato único para o front
+def _erro(status: int, mensagem: str, detalhe=None, headers=None) -> JSONResponse:
+    """{"erro": {"codigo", "mensagem", "detalhe"}} — e "detail" mantido por compatibilidade."""
+    corpo = {"erro": {"codigo": status, "mensagem": mensagem, "detalhe": detalhe},
+             "detail": detalhe if detalhe is not None else mensagem}
+    return JSONResponse(corpo, status_code=status, headers=headers)
+
+
+@app.exception_handler(StarletteHTTPException)
+async def _erro_http(_req, exc: StarletteHTTPException):
+    d = exc.detail
+    if isinstance(d, dict):
+        return _erro(exc.status_code, str(d.get("mensagem") or d.get("message") or "Erro"), d, exc.headers)
+    return _erro(exc.status_code, str(d), None, exc.headers)
+
+
+@app.exception_handler(RequestValidationError)
+async def _erro_validacao(_req, exc: RequestValidationError):
+    campos = [{"campo": ".".join(str(p) for p in e.get("loc", [])[1:]), "mensagem": e.get("msg")} for e in exc.errors()]
+    return _erro(422, "Dados inválidos: " + "; ".join(f"{c['campo']}: {c['mensagem']}" for c in campos), campos)
 
 
 @app.get("/health", tags=["infra"])

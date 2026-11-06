@@ -55,6 +55,7 @@ class Settings(BaseSettings):
 
     # --- Validade -----------------------------------------------------------
     VALIDADE_ALERTA_DIAS: int = 30      # vence em até N dias → status "vencendo" (e prioridade alta)
+    FUSO_HORAS: int = -3                # fuso para "hoje" / "esta semana" nos painéis (Brasília = -3)
 
     # --- Resumo -------------------------------------------------------------
     RESUMO_ATIVO: bool = True           # gera resumo de cada documento (modelo, ou simples sem modelo)
