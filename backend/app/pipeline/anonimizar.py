@@ -17,11 +17,29 @@ import io
 import logging
 import re
 import threading
+import unicodedata
 from functools import lru_cache
 
 from PIL import Image, ImageDraw
 
 from app.config import settings
+from app.tipos import TIPOS
+
+
+def _sem_acento(palavra: str) -> str:
+    return "".join(c for c in unicodedata.normalize("NFKD", palavra) if not unicodedata.combining(c)).lower()
+
+
+@lru_cache(maxsize=1)
+def _vocabulario_documentos() -> frozenset[str]:
+    """Palavras de títulos e termos dos tipos de documento (tipos.py). O reconhecedor de nomes às vezes
+    confunde título em maiúsculas com nome de pessoa ("CERTIDÃO NEGATIVA" → [NOME]); essas palavras nunca são nome."""
+    palavras = set()
+    for t in TIPOS.values():
+        fontes = [t["nome"], *t["palavras"], *(re.sub(r"\\[sdwb]|[^a-zA-Z ]", " ", rx) for rx in t["titulos"])]
+        for texto in fontes:
+            palavras.update(p for p in re.findall(r"[a-z]{4,}", _sem_acento(texto)))
+    return frozenset(palavras)
 
 log = logging.getLogger(__name__)
 
@@ -125,6 +143,9 @@ def _nomes_por_ner(texto: str) -> list[tuple[int, int]]:
         # tira tokens que não são nome (ex.: "Maria Silva   CPF") e espaços/pontuação
         toks = [t for t in toks if t.text.strip(",.;:/").upper() not in _NAO_NOME
                 and not t.is_punct and not t.is_space]
+        # termo de documento ("CERTIDÃO NEGATIVA", "DÉBITOS"...) não é nome de pessoa
+        if any(_sem_acento(t.text) in _vocabulario_documentos() for t in toks):
+            continue
         if not toks or _RX_EMPRESA.search(ent.text):
             continue
         if not any(re.fullmatch(_PALAVRA_NOME, t.text) for t in toks):
