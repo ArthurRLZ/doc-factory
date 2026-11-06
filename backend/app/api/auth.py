@@ -8,13 +8,14 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.api.deps import UsuarioAtual, admin, usuario_atual
+from app.api.deps import UsuarioAtual, admin, exigir_api_key, usuario_atual
 from app.config import settings
 from app.db import get_db
 from app.models import Usuario
-from app.schemas import EuOut, TokenOut, UsuarioIn, UsuarioOut
+from app.schemas import CadastroIn, EuOut, TokenOut, UsuarioIn, UsuarioOut
 from app.security import criar_token, hash_senha, verificar_senha
 
 log = logging.getLogger(__name__)
@@ -30,18 +31,48 @@ def login(form: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get
     return TokenOut(access_token=criar_token(u.login, u.perfil), perfil=u.perfil)
 
 
+@router.post("/auth/registrar", response_model=TokenOut, status_code=201)
+def registrar(dados: CadastroIn, db: Session = Depends(get_db)):
+    """Cria uma conta de analista e autentica o usuário."""
+    if db.scalar(select(Usuario).where(Usuario.login == dados.login)):
+        raise HTTPException(409, "Este usuário já está cadastrado")
+
+    usuario = Usuario(
+        login=dados.login,
+        nome=dados.nome,
+        perfil="analista",
+        senha_hash=hash_senha(dados.senha),
+    )
+    db.add(usuario)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409, "Este usuário já está cadastrado")
+    return TokenOut(access_token=criar_token(usuario.login, usuario.perfil), perfil=usuario.perfil)
+
+
 @router.get("/auth/eu", response_model=EuOut)
 def quem_sou_eu(u: UsuarioAtual = Depends(usuario_atual)):
     return EuOut(login=u.login, perfil=u.perfil, autenticado=u.autenticado)
 
 
 @router.get("/usuarios", response_model=list[UsuarioOut])
-def listar_usuarios(db: Session = Depends(get_db), _u: UsuarioAtual = Depends(admin)):
+def listar_usuarios(
+    db: Session = Depends(get_db),
+    _u: UsuarioAtual = Depends(admin),
+    _api_key: None = Depends(exigir_api_key),
+):
     return list(db.scalars(select(Usuario).order_by(Usuario.login)))
 
 
 @router.post("/usuarios", response_model=UsuarioOut, status_code=201)
-def criar_usuario(dados: UsuarioIn, db: Session = Depends(get_db), _u: UsuarioAtual = Depends(admin)):
+def criar_usuario(
+    dados: UsuarioIn,
+    db: Session = Depends(get_db),
+    _u: UsuarioAtual = Depends(admin),
+    _api_key: None = Depends(exigir_api_key),
+):
     if db.scalar(select(Usuario).where(Usuario.login == dados.login)):
         raise HTTPException(409, "Login já existe")
     u = Usuario(login=dados.login, nome=dados.nome, perfil=dados.perfil, senha_hash=hash_senha(dados.senha))
@@ -51,7 +82,12 @@ def criar_usuario(dados: UsuarioIn, db: Session = Depends(get_db), _u: UsuarioAt
 
 
 @router.post("/usuarios/{usuario_id}/desativar", response_model=UsuarioOut)
-def desativar_usuario(usuario_id: int, db: Session = Depends(get_db), atual: UsuarioAtual = Depends(admin)):
+def desativar_usuario(
+    usuario_id: int,
+    db: Session = Depends(get_db),
+    atual: UsuarioAtual = Depends(admin),
+    _api_key: None = Depends(exigir_api_key),
+):
     u = db.get(Usuario, usuario_id)
     if not u:
         raise HTTPException(404, "Usuário não encontrado")

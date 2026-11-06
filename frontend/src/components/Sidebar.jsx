@@ -1,9 +1,11 @@
 import { useNavigate, useLocation } from 'react-router-dom';
 import { LayoutDashboard, FileText, ListOrdered, BarChart2, Settings, ChevronRight } from 'lucide-react';
+import { useAuth } from '../context/useAuth';
 
 export default function Sidebar() {
   const navigate = useNavigate();
   const location = useLocation();
+  const { user } = useAuth();
 
   const menuItems = [
     { icon: LayoutDashboard, label: 'Visão geral', path: '/' },
@@ -94,11 +96,11 @@ export default function Sidebar() {
         <div className="pt-2 border-t border-slate-100 flex items-center justify-between px-1">
           <div className="flex items-center gap-2.5">
             <div className="w-9 h-9 rounded-full bg-indigo-100 text-indigo-700 font-bold text-xs flex items-center justify-center">
-              MC
+              {user?.login?.slice(0, 2).toUpperCase() || 'U'}
             </div>
             <div>
-              <p className="text-xs font-bold text-slate-800">Marina Costa</p>
-              <p className="text-[11px] text-slate-400">Empresa Aster</p>
+              <p className="text-xs font-bold text-slate-800">{user?.login || 'Usuário'}</p>
+              <p className="text-[11px] text-slate-400">{user?.perfil || 'Conta'}</p>
             </div>
           </div>
           <ChevronRight className="w-4 h-4 text-slate-400" />

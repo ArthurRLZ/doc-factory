@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     S3_SECRET_KEY: str | None = None
 
     # --- Segurança -------------------------------------------------------
-    API_KEY: str | None = None          # se definido, exige header X-API-Key
+    API_KEY: str | None = None          # chave opcional no modo demo; AUTH_ATIVO usa JWT
     CORS_ORIGINS: str = "*"             # separar por vírgula
     # login com perfis (analista < revisor < admin). Desligado = API aberta (demo).
     AUTH_ATIVO: bool = False

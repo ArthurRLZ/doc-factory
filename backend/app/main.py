@@ -43,7 +43,7 @@ app.add_middleware(CORSMiddleware, allow_origins=[o.strip() for o in settings.CO
                    allow_methods=["*"], allow_headers=["*"])
 
 protegido = [Depends(exigir_api_key)]
-app.include_router(auth.router, dependencies=protegido)
+app.include_router(auth.router)
 app.include_router(painel.router, dependencies=protegido)
 app.include_router(automacao.router, dependencies=protegido)
 app.include_router(lotes.router, dependencies=protegido)

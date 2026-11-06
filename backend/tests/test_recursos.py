@@ -181,6 +181,37 @@ def test_worker_atende_lote_de_prioridade_maior_primeiro():
 
 
 # ------------------------------------------------------------------ login e perfis
+def test_cadastro_cria_analista_e_autentica(monkeypatch, processado):
+    c, _ = processado
+    monkeypatch.setattr(settings, "API_KEY", "chave-de-integracao")
+    r = c.post("/auth/registrar", json={
+        "login": "  novo_analista  ",
+        "nome": "  Nova Pessoa  ",
+        "senha": "senha-segura-123",
+        "perfil": "admin",
+    })
+    assert r.status_code == 201, r.text
+    assert r.json()["perfil"] == "analista"
+
+    monkeypatch.setattr(settings, "AUTH_ATIVO", True)
+    headers = {"Authorization": f"Bearer {r.json()['access_token']}"}
+    assert c.get("/auth/eu", headers=headers).json() == {
+        "login": "novo_analista",
+        "perfil": "analista",
+        "autenticado": True,
+    }
+    assert c.post("/auth/registrar", json={
+        "login": "novo_analista",
+        "nome": "Outra pessoa",
+        "senha": "senha-segura-123",
+    }).status_code == 409
+    assert c.post("/auth/registrar", json={
+        "login": "curto",
+        "nome": "Pessoa",
+        "senha": "123",
+    }).status_code == 422
+
+
 @pytest.fixture
 def login_ativo(monkeypatch, processado):
     monkeypatch.setattr(settings, "AUTH_ATIVO", True)
@@ -199,8 +230,9 @@ def login_ativo(monkeypatch, processado):
     return c, lote, token
 
 
-def test_login_e_perfis(login_ativo):
+def test_login_e_perfis(login_ativo, monkeypatch):
     c, lote, token = login_ativo
+    monkeypatch.setattr(settings, "API_KEY", "chave-de-integracao")
     assert c.get("/lotes").status_code == 401                                  # sem token
     assert c.post("/auth/login", data={"username": "adm", "password": "errada"}).status_code == 401
 

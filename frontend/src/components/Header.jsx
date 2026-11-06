@@ -1,6 +1,11 @@
-import { Search, Bell, ChevronDown } from 'lucide-react';
+import { Search, Bell, LogOut } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../context/useAuth';
 
 export default function Header() {
+  const { user, logout } = useAuth();
+  const navigate = useNavigate();
+
   return (
     <header className="h-16 border-b border-slate-100 bg-white flex items-center justify-between px-8 sticky top-0 z-10">
       {/* Search Input */}
@@ -25,15 +30,26 @@ export default function Header() {
 
         <div className="h-6 w-px bg-slate-200" />
 
-        <div className="flex items-center gap-3 cursor-pointer">
+        <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-full bg-indigo-100 text-indigo-700 font-semibold text-xs flex items-center justify-center">
-            MC
+            {user?.login?.slice(0, 2).toUpperCase() || 'U'}
           </div>
           <div className="text-left">
-            <p className="text-xs font-bold text-slate-800">Marina Costa</p>
-            <p className="text-[10px] text-slate-400">Administradora</p>
+            <p className="text-xs font-bold text-slate-800">{user?.login || 'Usuário'}</p>
+            <p className="text-[10px] text-slate-400">{user?.perfil || 'Conta'}</p>
           </div>
-          <ChevronDown className="w-4 h-4 text-slate-400" />
+          <button
+            aria-label="Sair da conta"
+            className="rounded-lg p-2 text-slate-400 transition hover:bg-slate-50 hover:text-slate-700"
+            onClick={() => {
+              logout();
+              navigate('/login', { replace: true });
+            }}
+            title="Sair"
+            type="button"
+          >
+            <LogOut className="h-4 w-4" />
+          </button>
         </div>
       </div>
     </header>

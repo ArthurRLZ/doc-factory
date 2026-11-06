@@ -14,7 +14,9 @@ oauth2 = OAuth2PasswordBearer(tokenUrl="/auth/login", auto_error=False)
 
 
 def exigir_api_key(x_api_key: str | None = Header(default=None)):
-    """Chave única opcional (integrações máquina-a-máquina). Login com perfis: AUTH_ATIVO=true."""
+    """Usa a chave no modo demo; com login ativo, as rotas exigem JWT em vez de uma chave compartilhada."""
+    if settings.AUTH_ATIVO:
+        return
     if settings.API_KEY and x_api_key != settings.API_KEY:
         raise HTTPException(401, "X-API-Key inválida ou ausente")
 

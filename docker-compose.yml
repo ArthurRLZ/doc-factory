@@ -19,6 +19,7 @@ services:
       STORAGE_BACKEND: local
       DATA_DIR: /tmp/docfactory
       WORKER_INLINE: "false"
+      AUTH_ATIVO: "true"
     ports: ["8000:8000"]
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"]
