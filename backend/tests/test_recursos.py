@@ -212,6 +212,8 @@ def test_login_e_perfis(login_ativo):
     assert c.post(f"/documentos/{alvo}/revisao", json={"acao": "aprovar"}, headers=ana).status_code == 403
     assert c.get(f"/documentos/{alvo}/pdf", params={"anonimizado": False}, headers=ana).status_code == 403
     assert c.get(f"/documentos/{alvo}/pdf", headers=ana).status_code == 200     # anonimizado liberado
+    assert c.get(f"/lotes/{lote['id']}/paginas/0/imagem", headers=ana).status_code == 403
+    assert c.get(f"/lotes/{lote['id']}/paginas/0/imagem", headers=rui).status_code == 200
 
     r = c.post(f"/documentos/{alvo}/revisao", json={"acao": "aprovar", "usuario": "forjado"}, headers=rui)
     assert r.status_code == 200

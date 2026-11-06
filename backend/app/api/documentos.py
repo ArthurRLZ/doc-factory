@@ -198,6 +198,8 @@ def fila_de_revisao(lote_id: str | None = None, db: Session = Depends(get_db), _
 def revisar(doc_id: str, r: RevisaoIn, db: Session = Depends(get_db), u: UsuarioAtual = Depends(revisor)):
     d = _obter(db, doc_id)
     lote = d.lote
+    if lote.status in ("processando", "segmentando"):
+        raise HTTPException(409, "Aguarde o processamento do lote terminar antes de revisar.")
     usuario = u.login if u.autenticado else (r.usuario or "anonimo")
     antes = _snapshot(d)
     afetados = [d]

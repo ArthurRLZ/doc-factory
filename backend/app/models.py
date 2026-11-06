@@ -48,6 +48,17 @@ class Lote(Base):
                                                          order_by="Documento.ordem")
 
 
+class VersaoLote(Base):
+    """Retrato anterior ao reprocessamento; inclui documentos, páginas e revisões."""
+    __tablename__ = "versoes_lote"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    lote_id: Mapped[str] = mapped_column(ForeignKey("lotes.id", ondelete="CASCADE"), index=True)
+    usuario: Mapped[str] = mapped_column(String(100))
+    criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=agora)
+    dados: Mapped[dict] = mapped_column(JSON)
+
+
 class Pagina(Base):
     """Unidade de trabalho do worker. Cada página é processada de forma idempotente."""
     __tablename__ = "paginas"
