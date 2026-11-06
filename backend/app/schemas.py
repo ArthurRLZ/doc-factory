@@ -35,6 +35,7 @@ class LoteOut(BaseModel):
     regras_aplicadas: list[dict] | None = None   # regras de separação em vigor neste lote
     origem: str = "interno"                      # interno | portal (enviado pelo fornecedor)
     fornecedor: str | None = None                # nome do convite, quando veio do portal
+    multidoc: list[dict] | None = None           # páginas que tinham várias folhas e foram recortadas (F8)
 
     _p = field_validator("prioridade", mode="before")(_prioridade_texto)
 

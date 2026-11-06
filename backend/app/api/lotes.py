@@ -19,7 +19,7 @@ from app.config import settings
 from app.db import get_db
 from app.llm import contador, obter_llm
 from app.models import ConviteFornecedor, Lote, Pagina, RegraSeparacao, Revisao, Trabalhador, VersaoLote, novo_id
-from app.pipeline import avaliacao, fraude, privacidade, rasterizar, regras_separacao
+from app.pipeline import avaliacao, fraude, multidoc, privacidade, rasterizar, regras_separacao
 from app.pipeline.rasterizar import contar_paginas
 from app.schemas import DocumentoOut, LoteOut, PaginaOut
 from app.status import StatusLote, StatusPagina
@@ -127,17 +127,43 @@ def criar_lote_de_arquivo(db: Session, nome: str, caminho: str, ext: str, digest
     """Cria o lote a partir de um arquivo já recebido em disco (upload interno e portal do fornecedor usam esta
     mesma função): confere o conteúdo, conta páginas, guarda no storage, cria o Lote e a fila de páginas.
     Recebe um caminho e não bytes: lote de 1 GB nunca vai inteiro para a memória."""
+    if not conteudo_confere(caminho, ext):
+        raise HTTPException(415, f"O conteúdo do arquivo não é um {ext.lstrip('.').upper()} de verdade")
+    lote_id = novo_id()
+    original_key, multidoc_info, normalizado = None, None, None
+    if settings.MULTIDOC_ATIVO and tamanho <= settings.MULTIDOC_MAX_MB * 1024 * 1024:
+        with open(caminho, "rb") as f:
+            r = multidoc.normalizar_arquivo(f.read(), f"arquivo{ext}")
+        if r:   # várias folhas numa página: o lote passa a usar o PDF normalizado (o hash segue o do original)
+            original_key = f"lotes/{lote_id}/original_enviado{ext}"
+            get_storage().put_file(original_key, caminho)
+            fd, normalizado = tempfile.mkstemp(suffix=".pdf")
+            with os.fdopen(fd, "wb") as f:
+                f.write(r[0])
+            caminho, ext, tamanho, multidoc_info = normalizado, ".pdf", len(r[0]), r[1]
+    try:
+        return _registrar_lote(db, lote_id, nome, caminho, ext, digest, tamanho, enviado_por=enviado_por,
+                               prioridade=prioridade, origem=origem, convite_id=convite_id, regras_texto=regras_texto,
+                               max_paginas=max_paginas, original_key=original_key, multidoc_info=multidoc_info)
+    finally:
+        if normalizado and os.path.exists(normalizado):
+            os.unlink(normalizado)
+
+
+def _registrar_lote(db: Session, lote_id: str, nome: str, caminho: str, ext: str, digest: str, tamanho: int, *,
+                    enviado_por, prioridade, origem, convite_id, regras_texto, max_paginas, original_key,
+                    multidoc_info) -> Lote:
     n = _validar_arquivo(caminho, ext)
     if max_paginas and n > max_paginas:
         raise HTTPException(422, f"Arquivo com {n} páginas; o limite é {max_paginas}")
     alertas_arquivo = fraude.analisar_pdf(caminho)        # metadados do PDF (editor, modificação)
-    lote_id = novo_id()
     key = key_original(lote_id, ext)
     get_storage().put_file(key, caminho)
     lote = Lote(id=lote_id, nome=nome, arquivo_key=key, hash_sha256=digest,
                 mime=MIMES.get(ext, "application/octet-stream"), tamanho_bytes=tamanho,
                 total_paginas=n, status=StatusLote.PROCESSANDO, prioridade=prioridade,
                 enviado_por=enviado_por, alertas=alertas_arquivo, origem=origem, convite_id=convite_id,
+                arquivo_original_key=original_key, multidoc=multidoc_info,
                 regras_aplicadas=retrato_das_regras(db, regras_texto))
     db.add(lote)
     db.add_all(Pagina(lote_id=lote_id, numero=i) for i in range(n))   # fila de trabalho = as páginas
@@ -145,10 +171,12 @@ def criar_lote_de_arquivo(db: Session, nome: str, caminho: str, ext: str, digest
         db.commit()
     except Exception:
         db.rollback()
-        try:
-            get_storage().delete(key)
-        except Exception:
-            log.exception("Falha ao remover arquivo após erro ao registrar lote")
+        for k in (key, original_key):
+            try:
+                if k:
+                    get_storage().delete(k)
+            except Exception:
+                log.exception("Falha ao remover arquivo após erro ao registrar lote")
         raise
     return lote
 

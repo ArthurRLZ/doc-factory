@@ -67,6 +67,15 @@ class Settings(BaseSettings):
     PRE_REVISAO_ATIVA: bool = True          # documento pendente ganha explicação + sugestão antes do revisor abrir
     PRE_REVISAO_MAX_POR_LOTE: int = 50      # teto de chamadas de IA de pré-revisão por lote (o resto: por regras)
 
+    # --- Vários documentos numa imagem (F8): detecção por contornos, no upload -------------
+    MULTIDOC_ATIVO: bool = True
+    MULTIDOC_PDF: bool = True               # também em páginas-imagem de PDF escaneado (nunca em PDF com texto)
+    MULTIDOC_AREA_MIN_PCT: float = 8.0      # cada folha precisa ter pelo menos 8% da área da página
+    MULTIDOC_MAX_RECORTES: int = 6          # mais regiões que isso = suspeito, não divide
+    MULTIDOC_DPI_DETECCAO: int = 100
+    MULTIDOC_DPI_RECORTE: int = 300
+    MULTIDOC_MAX_MB: int = 100              # arquivo maior que isso não passa pela detecção (memória)
+
     # --- Portal do fornecedor (F7): link privado, sem login --------------------------------
     PORTAL_ATIVO: bool = True
     PORTAL_URL_BASE: str = "http://localhost:5173"   # o link enviado ao fornecedor é {base}/portal/{token}

@@ -67,6 +67,9 @@ class Lote(Base):
     # portal do fornecedor (F7). convite_id sem FK de propósito: coluna nova em tabela existente (migração leve)
     origem: Mapped[str] = mapped_column(String(20), default="interno", server_default="interno")
     convite_id: Mapped[int | None] = mapped_column(Integer)
+    # F8: o arquivo enviado tinha várias folhas numa página → arquivo_key é o PDF normalizado (1 folha por página)
+    arquivo_original_key: Mapped[str | None] = mapped_column(String(512))
+    multidoc: Mapped[list | None] = mapped_column(JSON)               # [{"pagina_original": 0, "recortes": 2}]
 
     paginas: Mapped[list["Pagina"]] = relationship(back_populates="lote", cascade="all, delete-orphan",
                                                    order_by="Pagina.numero")
