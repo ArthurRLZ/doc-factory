@@ -1,6 +1,7 @@
 """Documentos, fila de revisão humana, auditoria, resumo, vencimentos e busca."""
 import logging
-from datetime import date, datetime, timedelta
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -8,19 +9,37 @@ from fastapi.responses import Response
 from sqlalchemy import and_, func, literal_column, or_, select, update
 from sqlalchemy.orm import Session
 
+from app import util
 from app.api.deps import UsuarioAtual, analista, revisor
+from app.config import settings
 from app.db import E_POSTGRES, get_db
 from app.models import Documento, Pagina, Revisao
-from app.pipeline import aprendizado, validade
+from app.pipeline import aprendizado, fraude, validade
 from app.pipeline.orquestrador import atribuir_trabalhador, gerar_arquivos
 from app.pipeline.resumir import nome_prioridade, resumir_documento
-from app.config import settings
-from app.schemas import (BuscaItem, DocumentoOut, PaginaDocumentos, Prioridade, RevisaoIn, RevisaoOut,
-                         TrabalhadorRef, ValidadeOut)
+from app.schemas import (
+    BuscaItem,
+    DocumentoOut,
+    PaginaDocumentos,
+    Prioridade,
+    RevisaoIn,
+    RevisaoOut,
+    TrabalhadorRef,
+    ValidadeOut,
+)
 from app.storage import get_storage
-from app.tipos import PRIORIDADES, SETORES, TIPOS, TIPOS_COM_VALIDADE, nome_tipo, setor_do_tipo
+from app.tipos import (
+    PRIORIDADES,
+    SETORES,
+    TIPOS,
+    TIPOS_COM_VALIDADE,
+    nome_tipo,
+    setor_do_tipo,
+)
+from app.status import StatusLote, StatusRevisao
 
 router = APIRouter(tags=["documentos"])
+
 log = logging.getLogger(__name__)
 
 
@@ -77,7 +96,7 @@ def listar_documentos(tipo: str | None = None, setor: str | None = None, priorid
     prazo: vencido | vencendo (até VALIDADE_ALERTA_DIAS) | esta_semana (até 7 dias) | vigente | indeterminado | sem_validade
     ordenar: recentes | prazo (vence primeiro) | prioridade (alta primeiro) | confianca (menor primeiro)
     """
-    hoje = date.today()
+    hoje = util.hoje()
     cond = []
     if tipo:
         cond.append(Documento.tipo == tipo)
@@ -132,7 +151,7 @@ def listar_setores(_u: UsuarioAtual = Depends(analista)):
 def vencimentos(ate_dias: int = 30, incluir_vencidos: bool = True, lote_id: str | None = None,
                 db: Session = Depends(get_db), _u: UsuarioAtual = Depends(analista)):
     """Documentos que vencem nos próximos `ate_dias` dias (e os já vencidos), do mais urgente ao menos."""
-    hoje = date.today()
+    hoje = util.hoje()
     q = select(Documento).where(Documento.validade_data.is_not(None),
                                 Documento.validade_data <= hoje + timedelta(days=max(0, ate_dias)))
     if not incluir_vencidos:
@@ -161,10 +180,10 @@ def baixar_pdf(doc_id: str, anonimizado: bool = True, db: Session = Depends(get_
     nome = f"{d.ordem + 1:03d}_{d.tipo.lower()}{'_anon' if anonimizado else ''}.pdf"
     try:
         conteudo = get_storage().get_bytes(key)
-    except FileNotFoundError:
-        raise HTTPException(404, "Arquivo do documento não encontrado no armazenamento")
+    except FileNotFoundError as e:
+        raise HTTPException(404, "Arquivo do documento não encontrado no armazenamento") from e
     return Response(conteudo, media_type="application/pdf",
-                    headers={"Content-Disposition": f'inline; filename="{nome}"'})
+                    headers={"Content-Disposition": util.content_disposition(nome, inline=True)})
 
 
 @router.get("/documentos/{doc_id}/revisoes", response_model=list[RevisaoOut])
@@ -187,92 +206,122 @@ def gerar_resumo(doc_id: str, db: Session = Depends(get_db), _u: UsuarioAtual = 
 @router.get("/revisao/fila", response_model=list[DocumentoOut])
 def fila_de_revisao(lote_id: str | None = None, db: Session = Depends(get_db), _u: UsuarioAtual = Depends(analista)):
     """Pendentes: prioridade mais alta primeiro; dentro da mesma prioridade, menor confiança primeiro."""
-    q = select(Documento).where(Documento.status_revisao == "pendente")
+    q = select(Documento).where(Documento.status_revisao == StatusRevisao.PENDENTE)
     if lote_id:
         q = q.where(Documento.lote_id == lote_id)
     q = q.order_by(Documento.prioridade.desc(), Documento.confianca.asc(), Documento.criado_em)
     return [doc_out(d) for d in db.scalars(q.limit(200))]
 
 
-@router.post("/documentos/{doc_id}/revisao", response_model=list[DocumentoOut])
-def revisar(doc_id: str, r: RevisaoIn, db: Session = Depends(get_db), u: UsuarioAtual = Depends(revisor)):
-    d = _obter(db, doc_id)
+@dataclass
+class _Resultado:
+    """O que uma ação de revisão produziu."""
+    afetados: list[Documento]
+    conteudo_mudou: bool = False                       # páginas/tipo mudaram → refaz os sinais de fraude
+    obsoletos: list[str] = field(default_factory=list)  # arquivos a apagar DEPOIS do commit
+
+
+def _aprovar(db: Session, d: Documento, r: RevisaoIn, usuario: str) -> _Resultado:
+    d.status_revisao = StatusRevisao.REVISADO
+    return _Resultado([d])
+
+
+def _alterar_tipo(db: Session, d: Documento, r: RevisaoIn, usuario: str) -> _Resultado:
+    if r.tipo not in TIPOS:
+        raise HTTPException(422, f"tipo deve ser um de {list(TIPOS)}")
+    aprendizado.registrar(db, d, d.tipo, r.tipo, usuario)   # o sistema aprende com a correção
+    d.tipo, d.status_revisao = r.tipo, StatusRevisao.REVISADO
+    atribuir_trabalhador(db, d, _paginas(db, d.id))      # o tipo decide se entra no dossiê
+    resumir_documento(d.lote, d)
+    return _Resultado([d], conteudo_mudou=True)
+
+
+def _alterar_prioridade(db: Session, d: Documento, r: RevisaoIn, usuario: str) -> _Resultado:
+    if r.prioridade is None:
+        raise HTTPException(422, "informe prioridade: alta, media ou baixa")
+    d.prioridade, d.prioridade_motivo = PRIORIDADES[r.prioridade], f"definida manualmente por {usuario}"
+    d.prioridade_manual = True
+    return _Resultado([d])
+
+
+def _dividir(db: Session, d: Documento, r: RevisaoIn, usuario: str) -> _Resultado:
+    lote, pags = d.lote, _paginas(db, d.id)
+    numeros = [p.numero for p in pags]
+    if r.pagina_corte is None or r.pagina_corte not in numeros or r.pagina_corte == numeros[0]:
+        raise HTTPException(422, "pagina_corte deve ser uma página do documento (exceto a primeira)")
+    # abre espaço na ordem para o novo documento
+    db.execute(update(Documento).where(Documento.lote_id == lote.id, Documento.ordem > d.ordem)
+               .values(ordem=Documento.ordem + 1))
+    novo = Documento(lote_id=lote.id, ordem=d.ordem + 1, tipo=d.tipo, pagina_inicio=r.pagina_corte,
+                     pagina_fim=d.pagina_fim, confianca=d.confianca, status_revisao=StatusRevisao.PENDENTE,
+                     motivos=["criado por divisão manual — confirme o tipo"])
+    db.add(novo)
+    db.flush()
+    antes_do_corte = [p for p in pags if p.numero < r.pagina_corte]
+    depois_do_corte = [p for p in pags if p.numero >= r.pagina_corte]
+    for p in depois_do_corte:
+        p.documento_id = novo.id
+    d.status_revisao = StatusRevisao.REVISADO
+    for doc, paginas in ((d, antes_do_corte), (novo, depois_do_corte)):
+        gerar_arquivos(lote, doc, paginas)
+        atribuir_trabalhador(db, doc, paginas)
+        resumir_documento(lote, doc)
+    return _Resultado([d, novo], conteudo_mudou=True)
+
+
+def _juntar_proximo(db: Session, d: Documento, r: RevisaoIn, usuario: str) -> _Resultado:
     lote = d.lote
-    if lote.status in ("processando", "segmentando"):
-        raise HTTPException(409, "Aguarde o processamento do lote terminar antes de revisar.")
-    usuario = u.login if u.autenticado else (r.usuario or "anonimo")
-    antes = _snapshot(d)
-    afetados = [d]
-    arquivos_obsoletos = []
+    prox = db.scalar(select(Documento).where(Documento.lote_id == lote.id, Documento.ordem == d.ordem + 1))
+    if not prox:
+        raise HTTPException(422, "Não há documento seguinte para juntar")
+    for p in _paginas(db, prox.id):
+        p.documento_id = d.id
+    obsoletos = [k for k in (prox.pdf_key, prox.pdf_anon_key) if k]
+    db.add(Revisao(documento_id=None, lote_id=lote.id, usuario=usuario, acao="removido_por_juncao",
+                   antes=_snapshot(prox) | {"id": prox.id}))
+    db.delete(prox)
+    db.flush()
+    db.execute(update(Documento).where(Documento.lote_id == lote.id, Documento.ordem > d.ordem + 1)
+               .values(ordem=Documento.ordem - 1))
+    d.status_revisao = StatusRevisao.REVISADO
+    paginas = _paginas(db, d.id)
+    gerar_arquivos(lote, d, paginas)
+    atribuir_trabalhador(db, d, paginas)
+    resumir_documento(lote, d)
+    return _Resultado([d], conteudo_mudou=True, obsoletos=obsoletos)
 
-    if r.acao == "aprovar":
-        d.status_revisao = "revisado"
 
-    elif r.acao == "alterar_tipo":
-        if r.tipo not in TIPOS:
-            raise HTTPException(422, f"tipo deve ser um de {list(TIPOS)}")
-        aprendizado.registrar(db, d, d.tipo, r.tipo, usuario)   # o sistema aprende com a correção
-        d.tipo, d.status_revisao = r.tipo, "revisado"
-        atribuir_trabalhador(db, d, _paginas(db, d.id))      # o tipo decide se entra no dossiê
-        resumir_documento(lote, d)
+_ACOES = {"aprovar": _aprovar, "alterar_tipo": _alterar_tipo, "alterar_prioridade": _alterar_prioridade,
+          "dividir": _dividir, "juntar_proximo": _juntar_proximo}
 
-    elif r.acao == "alterar_prioridade":
-        if r.prioridade is None:
-            raise HTTPException(422, "informe prioridade: alta, media ou baixa")
-        d.prioridade, d.prioridade_motivo = PRIORIDADES[r.prioridade], f"definida manualmente por {usuario}"
 
-    elif r.acao == "dividir":
-        pags = _paginas(db, d.id)
-        numeros = [p.numero for p in pags]
-        if r.pagina_corte is None or r.pagina_corte not in numeros or r.pagina_corte == numeros[0]:
-            raise HTTPException(422, "pagina_corte deve ser uma página do documento (exceto a primeira)")
-        # abre espaço na ordem para o novo documento
-        db.execute(update(Documento).where(Documento.lote_id == lote.id, Documento.ordem > d.ordem)
-                   .values(ordem=Documento.ordem + 1))
-        novo = Documento(lote_id=lote.id, ordem=d.ordem + 1, tipo=d.tipo, pagina_inicio=r.pagina_corte,
-                         pagina_fim=d.pagina_fim, confianca=d.confianca, status_revisao="pendente",
-                         motivos=["criado por divisão manual — confirme o tipo"])
-        db.add(novo)
-        db.flush()
-        for p in pags:
-            if p.numero >= r.pagina_corte:
-                p.documento_id = novo.id
-        d.status_revisao = "revisado"
-        gerar_arquivos(lote, d, [p for p in pags if p.numero < r.pagina_corte])
-        gerar_arquivos(lote, novo, [p for p in pags if p.numero >= r.pagina_corte])
-        atribuir_trabalhador(db, d, [p for p in pags if p.numero < r.pagina_corte])
-        atribuir_trabalhador(db, novo, [p for p in pags if p.numero >= r.pagina_corte])
-        resumir_documento(lote, d)
-        resumir_documento(lote, novo)
-        afetados.append(novo)
-
-    elif r.acao == "juntar_proximo":
-        prox = db.scalar(select(Documento).where(Documento.lote_id == lote.id, Documento.ordem == d.ordem + 1))
-        if not prox:
-            raise HTTPException(422, "Não há documento seguinte para juntar")
-        for p in _paginas(db, prox.id):
-            p.documento_id = d.id
-        arquivos_obsoletos = [k for k in (prox.pdf_key, prox.pdf_anon_key) if k]
-        db.add(Revisao(documento_id=None, lote_id=lote.id, usuario=usuario, acao="removido_por_juncao",
-                       antes=_snapshot(prox) | {"id": prox.id}))
-        db.delete(prox)
-        db.flush()
-        db.execute(update(Documento).where(Documento.lote_id == lote.id, Documento.ordem > d.ordem + 1)
-                   .values(ordem=Documento.ordem - 1))
-        d.status_revisao = "revisado"
-        gerar_arquivos(lote, d, _paginas(db, d.id))
-        atribuir_trabalhador(db, d, _paginas(db, d.id))
-        resumir_documento(lote, d)
-
-    db.add(Revisao(documento_id=d.id, lote_id=lote.id, usuario=usuario, acao=r.acao,
-                   antes=antes, depois=_snapshot(d)))
-    db.commit()
-    for key in arquivos_obsoletos:
+def _apagar_arquivos(chaves: list[str]) -> None:
+    for key in chaves:
         try:
             get_storage().delete(key)
         except Exception:
             log.exception("Não foi possível remover arquivo obsoleto após junção: %s", key)
-    return [doc_out(x) for x in afetados]
+
+
+@router.post("/documentos/{doc_id}/revisao", response_model=list[DocumentoOut])
+def revisar(doc_id: str, r: RevisaoIn, db: Session = Depends(get_db), u: UsuarioAtual = Depends(revisor)):
+    """Ação do revisor: aprovar · alterar_tipo · alterar_prioridade · dividir · juntar_proximo.
+    Toda ação fica na trilha de auditoria (antes/depois, quem, quando)."""
+    d = _obter(db, doc_id)
+    if d.lote.status in (StatusLote.PROCESSANDO, StatusLote.SEGMENTANDO):
+        raise HTTPException(409, "Aguarde o processamento do lote terminar antes de revisar.")
+    usuario = u.login if u.autenticado else (r.usuario or "anonimo")
+    antes = _snapshot(d)
+    res = _ACOES[r.acao](db, d, r, usuario)
+    if res.conteudo_mudou:
+        db.flush()
+        for x in res.afetados:             # conteúdo ou datas mudaram: sinais de fraude de novo
+            fraude.aplicar(db, d.lote, x, _paginas(db, x.id))
+    db.add(Revisao(documento_id=d.id, lote_id=d.lote_id, usuario=usuario, acao=r.acao,
+                   antes=antes, depois=_snapshot(d)))
+    db.commit()
+    _apagar_arquivos(res.obsoletos)        # só depois do commit: se o banco falhar, os arquivos continuam
+    return [doc_out(x) for x in res.afetados]
 
 
 # ------------------------------------------------------------ busca (OCR pesquisável)

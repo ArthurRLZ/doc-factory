@@ -17,12 +17,20 @@ from app.config import settings
 from app.llm import obter_llm
 from app.models import Documento, Lote
 from app.pipeline import validade
-from app.tipos import (DESCONHECIDO, PRIORIDADE_NOME, PRIORIDADES, campos_do_tipo,
-                       nome_tipo, prioridade_do_tipo)
+from app.tipos import (
+    DESCONHECIDO,
+    PRIORIDADE_NOME,
+    PRIORIDADES,
+    campos_do_tipo,
+    nome_tipo,
+    prioridade_do_tipo,
+)
+from app.status import StatusRevisao
 
 log = logging.getLogger(__name__)
 
 _RX_DATA = re.compile(r"\b\d{2}/\d{2}/\d{4}\b")
+
 # milhar com ponto ou espaço: o OCR às vezes lê "1.200,00" como "1 200,00"
 _RX_VALOR = re.compile(r"R\$\s?\d{1,3}(?:[. ]\d{3})*(?:,\d{2})?")
 _RX_MARCADOR = re.compile(r"^\[(CPF|CNPJ|RG|EMAIL|TELEFONE|NOME|ENDERECO|CEP)\]")
@@ -83,8 +91,8 @@ def _aplicar_validade(doc: Documento, sugestao_modelo: dict | None) -> tuple[str
     doc.validade_origem, doc.validade_evidencia = v.origem, v.evidencia
     if v.motivos:
         doc.motivos = list(dict.fromkeys((doc.motivos or []) + v.motivos))   # sem duplicar
-        if doc.status_revisao == "auto_aprovado":     # o que o revisor já aprovou continua aprovado
-            doc.status_revisao = "pendente"
+        if doc.status_revisao == StatusRevisao.AUTO_APROVADO:     # o que o revisor já aprovou continua aprovado
+            doc.status_revisao = StatusRevisao.PENDENTE
     return validade.status(doc.validade_data, doc.tipo)
 
 
@@ -99,16 +107,19 @@ def resumir_documento(lote: Lote, doc: Documento) -> None:
             resp = llm.resumir(nome_tipo(doc.tipo), campos_do_tipo(doc.tipo), doc.texto)
 
     status_v, dias = _aplicar_validade(doc, resp.validade if resp else None)
+    manual = doc.prioridade_manual          # prioridade definida pelo revisor não é sobrescrita
     if resp:
         doc.resumo, doc.campos, doc.resumo_origem = resp.resumo, resp.campos, "modelo"
-        doc.prioridade, doc.prioridade_motivo = calcular_prioridade(doc.tipo, lote.prioridade, resp.prioridade,
-                                                                    resp.motivo_prioridade, status_v, dias)
+        if not manual:
+            doc.prioridade, doc.prioridade_motivo = calcular_prioridade(doc.tipo, lote.prioridade, resp.prioridade,
+                                                                        resp.motivo_prioridade, status_v, dias)
     else:
         if settings.RESUMO_ATIVO:
             doc.resumo, doc.campos = resumo_simples(doc.tipo, doc.texto or "", n_paginas)
             doc.resumo_origem = "simples"
-        doc.prioridade, doc.prioridade_motivo = calcular_prioridade(doc.tipo, lote.prioridade, None,
-                                                                    status_validade=status_v, dias=dias)
+        if not manual:
+            doc.prioridade, doc.prioridade_motivo = calcular_prioridade(doc.tipo, lote.prioridade, None,
+                                                                        status_validade=status_v, dias=dias)
 
 
 def nome_prioridade(valor: int | None) -> str:

@@ -11,14 +11,16 @@ Alto risco manda o documento para a revisão humana; atenção só sinaliza.
 """
 import hashlib
 import re
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 
 import pymupdf
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app import util
 from app.models import Documento, Lote, Pagina
 from app.pipeline.classificar import normalizar
+from app.status import StatusRevisao
 
 EDITORES = ("photoshop", "gimp", "illustrator", "inkscape", "canva", "ilovepdf", "smallpdf", "sejda",
             "pdfescape", "pdf-xchange editor", "pdfelement", "paint.net", "affinity", "corel")
@@ -83,7 +85,7 @@ def alertas_documento(db: Session, lote: Lote, doc: Documento, paginas: list[Pag
     if nativas and len(nativas) < len(paginas):
         alertas.append(_alerta("paginas_misturadas", "media", "páginas digitais misturadas com páginas escaneadas",
                                f"páginas digitais: {', '.join(map(str, nativas))}"))
-    hoje = date.today()
+    hoje = util.hoje()
     if doc.validade_inicio and doc.validade_inicio > hoje + timedelta(days=1):
         alertas.append(_alerta("data_futura", "alta", "data de emissão/exame no futuro",
                                f"{doc.validade_inicio:%d/%m/%Y} (hoje é {hoje:%d/%m/%Y})"))
@@ -105,5 +107,5 @@ def aplicar(db: Session, lote: Lote, doc: Documento, paginas: list[Pagina]) -> N
     if doc.risco == "alto_risco":
         motivos = [f"possível fraude: {a['mensagem']}" for a in doc.alertas if a["gravidade"] == "alta"]
         doc.motivos = list(dict.fromkeys((doc.motivos or []) + motivos))
-        if doc.status_revisao == "auto_aprovado":
-            doc.status_revisao = "pendente"
+        if doc.status_revisao == StatusRevisao.AUTO_APROVADO:
+            doc.status_revisao = StatusRevisao.PENDENTE

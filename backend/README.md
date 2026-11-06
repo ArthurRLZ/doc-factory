@@ -42,7 +42,8 @@ automaticamente; o resultado novo precisa de revisão.
 | Aprender com correções | cada troca de tipo vira regra (título → tipo, vale sem modelo) e exemplo para o modelo; dá para desativar |
 | Sinais de fraude | PDF editado/modificado, documento repetido em outro lote, páginas misturadas, datas impossíveis → confiável / atenção / alto risco, com evidência |
 | Telas | `/painel`, `/documentos` (filtros e paginação), `/relatorios`, `/trabalhadores`, `/vencimentos`, `.zip` do lote |
-| Login e perfis | JWT, analista < revisor < admin (desligado por padrão para a demo) |
+| Login e perfis | JWT, analista < revisor < admin (desligado por padrão para a demo); bloqueio após 5 senhas erradas |
+| Segurança | modo produção recusa configuração insegura; arquivo conferido pelo conteúdo; erros sem detalhe interno; cabeçalhos de segurança; documento enviado ao modelo como dado (não instrução); `DELETE /lotes/{id}` para eliminação (LGPD) |
 
 **Stack:** FastAPI · PyMuPDF · Tesseract (`por`) · SQLAlchemy (SQLite no dev, PostgreSQL em produção) ·
 storage local ou MinIO/S3 · modelo plugável (qualquer API compatível com OpenAI).
@@ -58,7 +59,7 @@ python scripts/gerar_lote_teste.py lote_teste.pdf       # lote falso de 11 pági
 python scripts/gerar_lote_bernhoeft.py terceiros.pdf    # gestão de terceiros: 14 páginas / 12 documentos
                                                         # (datas relativas a hoje: vencidos, vencendo, vigentes)
 curl -F arquivo=@lote_teste.pdf http://localhost:8000/lotes
-pytest -q                                               # 66 testes, inclui ponta a ponta
+pytest -q                                               # 80 testes, inclui ponta a ponta
 ```
 
 ## Rodar a stack completa
@@ -103,7 +104,7 @@ app/
     fraude.py             sinais de adulteração com veredito e evidência
     orquestrador.py       liga tudo, grava banco/storage
 scripts/gerar_lote_teste.py · gerar_lote_bernhoeft.py
-tests/                 66 testes (pipeline, terceiros, validade, dossiê, telas, automação, anonimização, login)
+tests/                 80 testes (pipeline, terceiros, validade, dossiê, telas, automação, anonimização, login)
 ```
 
 ## Endpoints

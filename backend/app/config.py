@@ -14,7 +14,14 @@ class Settings(BaseSettings):
     S3_ACCESS_KEY: str | None = None
     S3_SECRET_KEY: str | None = None
 
+    # --- Ambiente -----------------------------------------------------------
+    # producao = a API se recusa a subir sem login, sem segredos ou com CORS aberto
+    AMBIENTE: str = "desenvolvimento"   # desenvolvimento | producao
+
     # --- Segurança -------------------------------------------------------
+    LOGIN_MAX_TENTATIVAS: int = 5       # erros seguidos de senha antes de bloquear o login
+    LOGIN_BLOQUEIO_MIN: int = 5         # minutos de bloqueio
+    MAX_MEGAPIXELS_PAGINA: float = 60.0 # página maior que isso é renderizada com DPI menor (protege a memória)
     API_KEY: str | None = None          # se definido, exige header X-API-Key
     CORS_ORIGINS: str = "*"             # separar por vírgula
     # login com perfis (analista < revisor < admin). Desligado = API aberta (demo).

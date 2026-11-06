@@ -3,6 +3,7 @@
 O PyMuPDF abre PDF, TIFF multipágina, PNG, JPG... com a mesma API.
 Nunca carregamos o lote inteiro na memória: renderizamos UMA página por vez.
 """
+import math
 from dataclasses import dataclass
 from threading import Lock
 
@@ -26,6 +27,14 @@ def _abrir(caminho: str) -> pymupdf.Document:
         return _cache[caminho]
 
 
+def fechar(caminho: str) -> None:
+    """Fecha o arquivo se estiver aberto no cache (antes de apagá-lo)."""
+    with _lock:
+        d = _cache.pop(caminho, None)
+        if d:
+            d.close()
+
+
 def contar_paginas(caminho: str) -> int:
     """Também serve de validação: arquivo corrompido levanta exceção aqui."""
     with pymupdf.open(caminho) as doc:
@@ -43,6 +52,7 @@ class PaginaRenderizada:
     nativa: bool               # True = PDF digital com camada de texto
     palavras_nativas: list[dict] | None
     texto_nativo: str | None
+    dpi: int = 300             # DPI realmente usado (menor em páginas gigantes)
 
 
 def renderizar(caminho: str, numero: int) -> PaginaRenderizada:
@@ -64,9 +74,20 @@ def renderizar(caminho: str, numero: int) -> PaginaRenderizada:
         else:
             texto = None
 
-    pix = page.get_pixmap(dpi=settings.DPI_OCR, colorspace=pymupdf.csGRAY, alpha=False)
+    dpi = dpi_seguro(rect.width, rect.height, settings.DPI_OCR, settings.MAX_MEGAPIXELS_PAGINA)
+    pix = page.get_pixmap(dpi=dpi, colorspace=pymupdf.csGRAY, alpha=False)
     png = pix.tobytes("png")
-    thumb = page.get_pixmap(dpi=settings.DPI_THUMB, alpha=False).tobytes("jpg", jpg_quality=70)
+    thumb_dpi = dpi_seguro(rect.width, rect.height, settings.DPI_THUMB, 1.0)
+    thumb = page.get_pixmap(dpi=thumb_dpi, alpha=False).tobytes("jpg", jpg_quality=70)
 
     return PaginaRenderizada(png=png, thumb_jpg=thumb, largura_pt=rect.width, altura_pt=rect.height,
-                             nativa=nativa, palavras_nativas=palavras, texto_nativo=texto)
+                             nativa=nativa, palavras_nativas=palavras, texto_nativo=texto, dpi=dpi)
+
+
+def dpi_seguro(largura_pt: float, altura_pt: float, dpi: int, max_megapixels: float) -> int:
+    """Reduz o DPI de páginas gigantes (ex.: planta de 2 m) para a imagem caber na memória.
+    Uma página A4 a 300 dpi tem ~8,7 megapixels; o limite padrão é 60."""
+    pixels = (largura_pt / 72 * dpi) * (altura_pt / 72 * dpi)
+    if pixels <= max_megapixels * 1e6:
+        return dpi
+    return max(10, int(dpi * math.sqrt(max_megapixels * 1e6 / pixels)))

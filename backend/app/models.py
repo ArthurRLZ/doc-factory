@@ -6,11 +6,24 @@ ficam no storage (disco/MinIO/S3) e o banco guarda só a chave (key) + hash.
 import uuid
 from datetime import date, datetime, timezone
 
-from sqlalchemy import (DDL, JSON, Boolean, Date, DateTime, Float, ForeignKey, Index,
-                        Integer, String, Text, event)
+from sqlalchemy import (
+    DDL,
+    JSON,
+    Boolean,
+    Date,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    event,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
+from app.status import StatusLote, StatusPagina
 
 
 def agora():
@@ -33,7 +46,7 @@ class Lote(Base):
     tamanho_bytes: Mapped[int] = mapped_column(Integer)
     total_paginas: Mapped[int] = mapped_column(Integer, default=0)
     # recebido → processando → segmentando → concluido | erro
-    status: Mapped[str] = mapped_column(String(20), default="recebido", index=True)
+    status: Mapped[str] = mapped_column(String(20), default=StatusLote.RECEBIDO, index=True)
     erro: Mapped[str | None] = mapped_column(Text)
     # 1 baixa · 2 normal · 3 alta — o worker atende primeiro os lotes de prioridade maior
     prioridade: Mapped[int] = mapped_column(Integer, default=2, server_default="2", index=True)
@@ -69,7 +82,7 @@ class Pagina(Base):
     documento_id: Mapped[str | None] = mapped_column(ForeignKey("documentos.id", ondelete="SET NULL"), index=True)
 
     # pendente → processando → ok | erro (retenta) → falhou (desistiu)
-    status: Mapped[str] = mapped_column(String(20), default="pendente", index=True)
+    status: Mapped[str] = mapped_column(String(20), default=StatusPagina.PENDENTE, index=True)
     tentativas: Mapped[int] = mapped_column(Integer, default=0)
     erro: Mapped[str | None] = mapped_column(Text)
 
@@ -129,6 +142,7 @@ class Documento(Base):
     # prioridade na fila de revisão: 1 baixa · 2 média · 3 alta
     prioridade: Mapped[int] = mapped_column(Integer, default=2, server_default="2", index=True)
     prioridade_motivo: Mapped[str | None] = mapped_column(String(300))
+    prioridade_manual: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")  # revisor decidiu
     titulo: Mapped[str | None] = mapped_column(String(200))           # título lido no documento (p/ a tela)
     trabalhador_id: Mapped[int | None] = mapped_column(ForeignKey("trabalhadores.id", ondelete="SET NULL"), index=True)
     # sinais de fraude: confiavel | atencao | alto_risco, com a lista de alertas (código, gravidade, evidência)

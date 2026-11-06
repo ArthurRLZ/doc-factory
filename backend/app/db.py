@@ -68,8 +68,9 @@ def migrar_colunas() -> list[str]:
                     continue
                 tipo = col.type.compile(dialect=engine.dialect)
                 ddl = f'ALTER TABLE {tabela.name} ADD COLUMN "{col.name}" {tipo}'
-                if col.server_default is not None:
-                    ddl += f" DEFAULT {col.server_default.arg}"
+                if col.server_default is not None:     # entre aspas: vale em SQLite e PostgreSQL ('2', 'confiavel', '0')
+                    valor = str(col.server_default.arg).replace("'", "''")
+                    ddl += f" DEFAULT '{valor}'"
                 conn.execute(text(ddl))
                 adicionadas.append(f"{tabela.name}.{col.name}")
     return adicionadas

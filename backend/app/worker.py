@@ -25,8 +25,10 @@ from app.config import settings
 from app.db import E_POSTGRES, SessionLocal, init_db
 from app.models import Lote, Pagina, agora
 from app.pipeline.orquestrador import finalizar_lote_se_pronto, processar_pagina
+from app.status import StatusLote, StatusPagina
 
 # 1 thread por Tesseract: com vários workers em paralelo isso é MAIS rápido (evita disputa de CPU)
+
 os.environ.setdefault("OMP_THREAD_LIMIT", "1")
 
 log = logging.getLogger("worker")
@@ -35,15 +37,15 @@ _parar = threading.Event()
 
 def recuperar_travadas(db, tudo: bool = False) -> int:
     limite = agora() - timedelta(minutes=settings.WORKER_STALE_MIN)
-    cond = Pagina.status == "processando"
+    cond = Pagina.status == StatusPagina.PROCESSANDO
     if not tudo:
         cond = and_(cond, Pagina.atualizado_em < limite)
-    n = db.execute(update(Pagina).where(cond).values(status="pendente")).rowcount
+    n = db.execute(update(Pagina).where(cond).values(status=StatusPagina.PENDENTE)).rowcount
     # lote que travou durante a segmentação volta para 'processando' e será finalizado de novo
-    cond_l = Lote.status == "segmentando"
+    cond_l = Lote.status == StatusLote.SEGMENTANDO
     if not tudo:
         cond_l = and_(cond_l, Lote.atualizado_em < limite)
-    db.execute(update(Lote).where(cond_l).values(status="processando"))
+    db.execute(update(Lote).where(cond_l).values(status=StatusLote.PROCESSANDO))
     db.commit()
     if n:
         log.warning("recuperadas %d páginas travadas", n)
@@ -53,8 +55,8 @@ def recuperar_travadas(db, tudo: bool = False) -> int:
 def reivindicar_pagina(db) -> Pagina | None:
     # lote de prioridade maior primeiro; dentro da mesma prioridade, ordem de chegada
     q = (select(Pagina).join(Lote, Lote.id == Pagina.lote_id)
-         .where(or_(Pagina.status == "pendente",
-                    and_(Pagina.status == "erro", Pagina.tentativas < settings.MAX_TENTATIVAS)))
+         .where(or_(Pagina.status == StatusPagina.PENDENTE,
+                    and_(Pagina.status == StatusPagina.ERRO, Pagina.tentativas < settings.MAX_TENTATIVAS)))
          .order_by(Lote.prioridade.desc(), Pagina.id).limit(1))
     if E_POSTGRES:
         q = q.with_for_update(skip_locked=True, of=Pagina)
@@ -62,7 +64,7 @@ def reivindicar_pagina(db) -> Pagina | None:
     if not p:
         db.rollback()
         return None
-    p.status, p.tentativas, p.atualizado_em = "processando", p.tentativas + 1, agora()
+    p.status, p.tentativas, p.atualizado_em = StatusPagina.PROCESSANDO, p.tentativas + 1, agora()
     db.commit()
     return p
 
@@ -72,7 +74,7 @@ def ciclo(db) -> bool:
     p = reivindicar_pagina(db)
     if not p:
         # lotes com todas as páginas prontas mas não finalizados (ex.: crash entre etapas)
-        for lote_id in db.scalars(select(Lote.id).where(Lote.status == "processando")).all():
+        for lote_id in db.scalars(select(Lote.id).where(Lote.status == StatusLote.PROCESSANDO)).all():
             finalizar_lote_se_pronto(db, lote_id)
         return False
 
@@ -85,10 +87,10 @@ def ciclo(db) -> bool:
         db.rollback()
         p = db.get(Pagina, pid)
         if _parar.is_set():   # interrompido por desligamento: devolve a página sem gastar tentativa
-            p.status, p.tentativas = "pendente", p.tentativas - 1
+            p.status, p.tentativas = StatusPagina.PENDENTE, p.tentativas - 1
             db.commit()
             return True
-        p.status = "erro" if p.tentativas < settings.MAX_TENTATIVAS else "falhou"
+        p.status = StatusPagina.ERRO if p.tentativas < settings.MAX_TENTATIVAS else StatusPagina.FALHOU
         p.erro = "".join(traceback.format_exception_only(type(e), e))[:2000]
         db.commit()
         log.error("lote %s pág %d %s: %s", lote_id[:8], numero + 1, p.status, e)

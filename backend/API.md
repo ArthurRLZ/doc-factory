@@ -156,3 +156,19 @@ modelo) e o trecho anonimizado vira exemplo para o modelo.
 - `GET /aprendizados` → `[{id, titulo, tipo_errado, tipo_certo, usuario, usos, ativo, criado_em}]`
   (`usos` = quantas páginas já foram decididas por esse aprendizado).
 - `POST /aprendizados/{id}/desativar` (admin) → desfaz uma correção feita por engano.
+
+## Erros e segurança (o que o front deve tratar)
+
+- **500** — erro inesperado: `erro.mensagem` traz um código de ocorrência ("Informe o código 5383630e ao suporte");
+  o detalhe técnico fica só no log do servidor.
+- **401** — sem login / token expirado → mandar para a tela de login.
+- **403** — perfil sem permissão (ex.: analista pedindo o PDF original).
+- **409** — arquivo já enviado (`erro.detalhe.lote_id`) ou lote ainda em processamento.
+- **413 / 415** — arquivo grande demais / tipo não aceito (o conteúdo é conferido, não só a extensão).
+- **429** — login bloqueado por tentativas erradas; respeite o cabeçalho `Retry-After` (segundos).
+
+## Apagar um lote (LGPD — direito de eliminação)
+
+`DELETE /lotes/{id}` (admin) apaga o lote, as páginas, os documentos, os arquivos e as pessoas que ficarem sem
+documento. Responde `{apagado, nome, paginas, documentos}` e deixa só um registro de auditoria sem dados pessoais.
+Lote em processamento → 409.
