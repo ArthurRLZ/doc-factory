@@ -32,6 +32,8 @@ def listar(lote_id: str | None = None, situacao: str | None = None,
         q = q.where(Trabalhador.id.in_(select(Documento.trabalhador_id).where(Documento.lote_id == lote_id)))
     itens = []
     for t in db.scalars(q):
+        if not t.documentos:            # pessoa que ficou sem documentos (ex.: após correção de tipo)
+            continue
         r = _resumo(t, checklist.avaliar(t))
         if not situacao or r["situacao"] == situacao:
             itens.append(r)

@@ -61,6 +61,15 @@ def test_cpf_nunca_guardado(lote_terceiros):
         assert all(len(t.cpf_hash) == 32 for t in db.query(Trabalhador))
 
 
+def test_contrato_e_nota_nao_criam_dossie(processado):
+    c, lote = processado
+    docs = c.get(f"/lotes/{lote['id']}/documentos").json()
+    por_tipo = {d["tipo"]: d for d in docs}
+    assert por_tipo["NOTA_FISCAL"]["trabalhador"] is None          # CPF do cliente, não de trabalhador
+    assert all(d["trabalhador"] is None for d in docs if d["tipo"] == "CONTRATO")
+    assert por_tipo["IDENTIDADE"]["trabalhador"] is not None        # RG é documento da pessoa
+
+
 def test_empresa_sem_trabalhador_e_painel(lote_terceiros):
     c, lote = lote_terceiros
     docs = c.get(f"/lotes/{lote['id']}/documentos").json()

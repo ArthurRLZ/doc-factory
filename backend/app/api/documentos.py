@@ -200,6 +200,7 @@ def revisar(doc_id: str, r: RevisaoIn, db: Session = Depends(get_db), u: Usuario
         if r.tipo not in TIPOS:
             raise HTTPException(422, f"tipo deve ser um de {list(TIPOS)}")
         d.tipo, d.status_revisao = r.tipo, "revisado"
+        atribuir_trabalhador(db, d, _paginas(db, d.id))      # o tipo decide se entra no dossiê
         resumir_documento(lote, d)
 
     elif r.acao == "alterar_prioridade":

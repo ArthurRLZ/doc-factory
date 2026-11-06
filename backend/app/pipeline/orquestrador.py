@@ -22,7 +22,7 @@ from app.pipeline.ocr import e_pagina_em_branco, ocr_png
 from app.pipeline.resumir import resumir_documento
 from app.pipeline.segmentar import PaginaInfo, segmentar
 from app.storage import get_storage, key_documento, key_pagina
-from app.tipos import DESCONHECIDO
+from app.tipos import DESCONHECIDO, TIPOS_DO_TRABALHADOR
 
 log = logging.getLogger(__name__)
 STATUS_EM_ABERTO = ("pendente", "processando", "erro")
@@ -155,7 +155,10 @@ def segmentar_e_montar(db: Session, lote: Lote) -> None:
 
 def atribuir_trabalhador(db: Session, doc: Documento, paginas: list[Pagina]) -> None:
     """Liga o documento à pessoa cujo CPF mais aparece nas suas páginas (pela impressão digital).
-    Documentos sem CPF (ex.: certidões da empresa) ficam sem trabalhador."""
+    Só tipos do trabalhador (TIPOS_DO_TRABALHADOR); documentos sem CPF ou da empresa ficam sem trabalhador."""
+    if doc.tipo not in TIPOS_DO_TRABALHADOR:
+        doc.trabalhador_id = None
+        return
     contagem: Counter = Counter()
     mascaras = {}
     for p in paginas:

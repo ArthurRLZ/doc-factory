@@ -99,7 +99,8 @@ def painel(db: Session = Depends(get_db), _u: UsuarioAtual = Depends(analista)):
         atencao.append({"tipo": "revisao", "gravidade": "media", "total": len(pendentes),
                         "titulo": "Revisões pendentes", "subtitulo": f"{altas} documento(s) de alta prioridade",
                         "acao": "Revisar", "rota": "/revisao/fila"})
-    irregulares = [t for t in db.scalars(select(Trabalhador)) if checklist.avaliar(t)["situacao"] == "irregular"]
+    irregulares = [t for t in db.scalars(select(Trabalhador))
+                   if t.documentos and checklist.avaliar(t)["situacao"] == "irregular"]
     if irregulares:
         atencao.append({"tipo": "trabalhadores_irregulares", "gravidade": "alta", "total": len(irregulares),
                         "titulo": f"{len(irregulares)} trabalhador(es) com documentação irregular",
