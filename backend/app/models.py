@@ -180,6 +180,7 @@ class Documento(Base):
     # quem decidiu o tipo: regra | ia | combinado | humano (app/pipeline/explicabilidade.py)
     decidido_por: Mapped[str | None] = mapped_column(String(12))
     regras_aplicadas: Mapped[list | None] = mapped_column(JSON)       # textos das regras que mudaram a separação
+    pre_revisao: Mapped[dict | None] = mapped_column(JSON)            # explicação + sugestão para o revisor (F2)
     ia_justificativa: Mapped[str | None] = mapped_column(String(500))
     criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=agora)
 

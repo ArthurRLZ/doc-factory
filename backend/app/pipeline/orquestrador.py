@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.llm import contador, obter_llm
 from app.models import Documento, Lote, Pagina, Trabalhador, VersaoLote, agora
-from app.pipeline import aprendizado, fraude, funcao, identidade, rasterizar
+from app.pipeline import aprendizado, fraude, funcao, identidade, pre_revisao, rasterizar
 from app.pipeline.explicabilidade import decidido_por
 from app.pipeline.anonimizar import indices_sensiveis, mascarar_texto, tarjar_imagem
 from app.pipeline.automacao import obter_limiar
@@ -195,6 +195,7 @@ def segmentar_e_montar(db: Session, lote: Lote) -> None:
             fraude.aplicar(db, lote, doc, pags)
         db.flush()
         _atualizar_funcoes(db, lote)
+        _pre_revisar(db, lote, por_numero)
         db.commit()
     except Exception:
         db.rollback()
@@ -209,6 +210,22 @@ def segmentar_e_montar(db: Session, lote: Lote) -> None:
             st.delete(key)
         except Exception:
             log.exception("Falha ao remover arquivo antigo após segmentação: %s", key)
+
+
+def _pre_revisar(db: Session, lote: Lote, por_numero: dict[int, Pagina]) -> None:
+    """Pendentes ganham explicação + sugestão (F2). Passado o teto de chamadas por lote, só por regras."""
+    if not settings.PRE_REVISAO_ATIVA:
+        return
+    llm, usadas = obter_llm(), 0
+    pendentes = db.scalars(select(Documento).where(Documento.lote_id == lote.id,
+                                                   Documento.status_revisao == StatusRevisao.PENDENTE)
+                           .order_by(Documento.ordem))
+    for doc in pendentes:
+        pags = [por_numero[n] for n in range(doc.pagina_inicio, doc.pagina_fim + 1) if n in por_numero]
+        usar_ia = usadas < settings.PRE_REVISAO_MAX_POR_LOTE
+        consulta_ia = (usar_ia and getattr(llm, "pre_revisar", None) is not None and bool((doc.texto or "").strip()))
+        doc.pre_revisao = pre_revisao.gerar(db, lote, doc, pags, llm, usar_ia)
+        usadas += consulta_ia
 
 
 def _atualizar_funcoes(db: Session, lote: Lote) -> None:

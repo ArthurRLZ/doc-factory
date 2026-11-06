@@ -101,6 +101,7 @@ class DocumentoOut(BaseModel):
     origem_texto: str | None = None               # o mesmo, em português para a tela
     ia_justificativa: str | None = None
     regras_aplicadas: list[str] | None = None     # regras de separação que mudaram a decisão neste documento
+    pre_revisao: dict | None = None               # {explicacao, acao_sugerida, tipo_sugerido, evidencias, origem}
 
     _p = field_validator("prioridade", mode="before")(_prioridade_texto)
 

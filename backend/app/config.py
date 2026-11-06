@@ -63,7 +63,9 @@ class Settings(BaseSettings):
     LLM_TIMEOUT: int = 60
     LLM_CUSTO_POR_CHAMADA_BRL: float = 0.0  # custo médio por chamada de IA, só para estimativa na tela (0 = não mostrar R$)
     FRAUDE_ATENCAO_REVISAO: bool = True
-    FUNCAO_EXIGENCIAS_ATIVO: bool = True    # a função lida no ASO/CTPS acrescenta as NRs exigidas ao checklist     # documento com risco "atencao" também vai para a fila de revisão
+    FUNCAO_EXIGENCIAS_ATIVO: bool = True
+    PRE_REVISAO_ATIVA: bool = True          # documento pendente ganha explicação + sugestão antes do revisor abrir
+    PRE_REVISAO_MAX_POR_LOTE: int = 50      # teto de chamadas de IA de pré-revisão por lote (o resto: por regras)    # a função lida no ASO/CTPS acrescenta as NRs exigidas ao checklist     # documento com risco "atencao" também vai para a fila de revisão
 
     # --- Validade -----------------------------------------------------------
     VALIDADE_ALERTA_DIAS: int = 30      # vence em até N dias → status "vencendo" (e prioridade alta)

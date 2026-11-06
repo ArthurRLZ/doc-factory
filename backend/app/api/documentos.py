@@ -13,8 +13,9 @@ from app import util
 from app.api.deps import UsuarioAtual, analista, revisor
 from app.config import settings
 from app.db import E_POSTGRES, get_db, tem_unaccent
+from app.llm import obter_llm
 from app.models import Documento, Pagina, Revisao
-from app.pipeline import aprendizado, explicabilidade, fraude, validade
+from app.pipeline import aprendizado, explicabilidade, fraude, pre_revisao, validade
 from app.pipeline.orquestrador import atribuir_trabalhador, gerar_arquivos
 from app.pipeline.resumir import nome_prioridade, resumir_documento
 from app.schemas import (
@@ -203,6 +204,15 @@ def gerar_resumo(doc_id: str, db: Session = Depends(get_db), _u: UsuarioAtual = 
     return doc_out(d)
 
 
+@router.post("/documentos/{doc_id}/pre-revisao", response_model=DocumentoOut)
+def gerar_pre_revisao(doc_id: str, db: Session = Depends(get_db), _u: UsuarioAtual = Depends(analista)):
+    """(Re)gera a explicação + sugestão para o revisor. Só sugere: nada é aplicado."""
+    d = _obter(db, doc_id)
+    d.pre_revisao = pre_revisao.gerar(db, d.lote, d, _paginas(db, d.id), obter_llm())
+    db.commit()
+    return doc_out(d)
+
+
 # ------------------------------------------------------------ revisão humana
 @router.get("/revisao/fila", response_model=list[DocumentoOut])
 def fila_de_revisao(lote_id: str | None = None, db: Session = Depends(get_db), _u: UsuarioAtual = Depends(analista)):
@@ -313,6 +323,7 @@ def revisar(doc_id: str, r: RevisaoIn, db: Session = Depends(get_db), u: Usuario
         raise HTTPException(409, "Aguarde o processamento do lote terminar antes de revisar.")
     usuario = u.login if u.autenticado else (r.usuario or "anonimo")
     antes = _snapshot(d)
+    seguiu = pre_revisao.seguiu(d.pre_revisao, r.acao, r.tipo)     # mede se a sugestão da pré-revisão ajuda
     res = _ACOES[r.acao](db, d, r, usuario)
     if r.acao in ("alterar_tipo", "dividir", "juntar_proximo"):   # aprovar confirma a decisão que já havia
         for x in res.afetados:
@@ -322,7 +333,7 @@ def revisar(doc_id: str, r: RevisaoIn, db: Session = Depends(get_db), u: Usuario
         for x in res.afetados:             # conteúdo ou datas mudaram: sinais de fraude de novo
             fraude.aplicar(db, d.lote, x, _paginas(db, x.id))
     db.add(Revisao(documento_id=d.id, lote_id=d.lote_id, usuario=usuario, acao=r.acao,
-                   antes=antes, depois=_snapshot(d)))
+                   antes=antes, depois=_snapshot(d) | ({"seguiu_sugestao": seguiu} if seguiu is not None else {})))
     db.commit()
     _apagar_arquivos(res.obsoletos)        # só depois do commit: se o banco falhar, os arquivos continuam
     return [doc_out(x) for x in res.afetados]
