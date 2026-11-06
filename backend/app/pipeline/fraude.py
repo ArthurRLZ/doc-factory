@@ -18,6 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app import util
+from app.config import settings
 from app.models import Documento, Lote, Pagina
 from app.pipeline.classificar import normalizar
 from app.status import StatusRevisao
@@ -106,6 +107,11 @@ def aplicar(db: Session, lote: Lote, doc: Documento, paginas: list[Pagina]) -> N
     doc.risco = veredito(doc.alertas)
     if doc.risco == "alto_risco":
         motivos = [f"possível fraude: {a['mensagem']}" for a in doc.alertas if a["gravidade"] == "alta"]
+    elif doc.risco == "atencao" and settings.FRAUDE_ATENCAO_REVISAO:
+        motivos = [f"atenção de fraude: {a['mensagem']}" for a in doc.alertas]
+    else:
+        motivos = []
+    if motivos:
         doc.motivos = list(dict.fromkeys((doc.motivos or []) + motivos))
-        if doc.status_revisao == StatusRevisao.AUTO_APROVADO:
+        if doc.status_revisao == StatusRevisao.AUTO_APROVADO:   # o que um revisor já decidiu continua decidido
             doc.status_revisao = StatusRevisao.PENDENTE

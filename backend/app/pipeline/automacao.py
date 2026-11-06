@@ -34,8 +34,13 @@ def motivos_bloqueantes(d: Documento) -> list[str]:
     return [m for m in (d.motivos or []) if not m.startswith(PREFIXO_MOTIVO_LIMIAR)]
 
 
+def risco_bloqueia(d: Documento) -> bool:
+    """Sinal de fraude manda para revisão independentemente do limiar (mexer no limiar não reaprova)."""
+    return d.risco == "alto_risco" or (d.risco == "atencao" and settings.FRAUDE_ATENCAO_REVISAO)
+
+
 def precisa_revisao(d: Documento, limiar: float) -> bool:
-    return d.confianca < limiar or bool(motivos_bloqueantes(d))
+    return d.confianca < limiar or bool(motivos_bloqueantes(d)) or risco_bloqueia(d)
 
 
 def definir_limiar(db: Session, limiar: float, usuario: str, aplicar: bool = True) -> int:

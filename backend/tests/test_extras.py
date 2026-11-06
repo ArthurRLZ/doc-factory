@@ -94,7 +94,9 @@ def test_documento_repetido_em_outro_lote(lote_terceiros):
         db.add(copia)
         db.flush()
         fraude.aplicar(db, outro, copia, [])
-        assert copia.risco == "atencao" and copia.status_revisao == "auto_aprovado"   # atenção só sinaliza
+        # F1: "atenção" agora também vai para a fila de revisão (antes só sinalizava)
+        assert copia.risco == "atencao" and copia.status_revisao == "pendente"
+        assert any(m.startswith("atenção de fraude:") for m in copia.motivos)
         assert copia.alertas[0]["codigo"] == "repetido" and "terceiros.pdf" in copia.alertas[0]["evidencia"]
         db.rollback()
 
