@@ -66,12 +66,15 @@ def processar_pagina(db: Session, pagina_id: int) -> None:
 
     # 3. classificação + sinais de início
     if em_branco:
-        p.tipo, p.confianca, p.tipo_regra, p.conf_regra, p.sinais = DESCONHECIDO, 0.0, DESCONHECIDO, 0.0, {}
+        p.tipo, p.confianca, p.tipo_regra, p.conf_regra = DESCONHECIDO, 0.0, DESCONHECIDO, 0.0
+        p.sinais = {"conteudo_incerto": True} if not r.nativa and o.conteudo_incerto else {}
     else:
         topo = texto_do_topo(palavras, r.altura_pt)
         regra = classificar_por_regras(texto or "", topo, aprendizado.regras(db))
         p.tipo_regra, p.conf_regra = regra.tipo, regra.confianca
         p.sinais = sinais_de_inicio(texto or "", topo) | {"scores": regra.scores}
+        if not texto or not texto.strip():
+            p.sinais = p.sinais | {"sem_texto_para_revisao": True}
         if regra.aprendizado_id:            # uma correção humana anterior decidiu esta página
             p.sinais = p.sinais | {"aprendizado": regra.aprendizado_id}
             aprendizado.contar_uso(db, regra.aprendizado_id)
@@ -119,6 +122,13 @@ def finalizar_lote_se_pronto(db: Session, lote_id: str) -> bool:
     lote = db.get(Lote, lote_id)
     try:
         segmentar_e_montar(db, lote)
+        incertas = [p.numero + 1 for p in lote.paginas if (p.sinais or {}).get("conteudo_incerto")]
+        alertas = [a for a in (lote.alertas or []) if a.get("codigo") != "paginas_incerto"]
+        if incertas:
+            alertas.append({"codigo": "paginas_incerto", "gravidade": "media",
+                            "mensagem": "Possível conteúdo em páginas consideradas separadoras; confira o arquivo original.",
+                            "evidencia": "Páginas: " + ", ".join(map(str, incertas))})
+        lote.alertas = alertas
         falhas = db.scalar(select(func.count()).select_from(Pagina).where(
             Pagina.lote_id == lote_id, Pagina.status == StatusPagina.FALHOU)) or 0
         if falhas:
@@ -153,6 +163,12 @@ def segmentar_e_montar(db: Session, lote: Lote) -> None:
                         ocr_conf=p.ocr_confianca if p.ocr_confianca is not None else 0.0,
                         inicio_llm=p.inicio_llm, sinais=p.sinais or {})
              for p in lote.paginas]
+    # Mesmo um lote inteiramente branco precisa ser visível para revisão humana.
+    # Caso contrário a segmentação descartaria todas as páginas e indicaria sucesso vazio.
+    if infos and all(p.em_branco for p in infos):
+        for p in infos:
+            p.em_branco = False
+            p.sinais = {**(p.sinais or {}), "sem_texto_para_revisao": True}
     por_numero = {p.numero: p for p in lote.paginas}
 
     novos = []

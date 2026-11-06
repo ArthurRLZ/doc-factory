@@ -149,6 +149,8 @@ def _fechar(doc: DocProposto, limiar: float) -> DocProposto:
         doc.motivos.append("falha no processamento de página")
     if doc.tipo == DESCONHECIDO:
         doc.motivos.append("tipo não identificado")
+    if any((i.sinais or {}).get("sem_texto_para_revisao") for i in doc._infos):
+        doc.motivos.append("Nenhum texto identificado; confira as páginas originais")
 
     doc.confianca = round(conf, 3)
     if doc.confianca < limiar and not doc.motivos:
