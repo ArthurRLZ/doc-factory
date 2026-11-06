@@ -41,8 +41,9 @@ def _obter(db: Session, doc_id: str) -> Documento:
 
 @router.get("/tipos")
 def listar_tipos(_u: UsuarioAtual = Depends(analista)):
-    return [{"codigo": c, "nome": t["nome"], "prioridade": t.get("prioridade", "media"),
-             "campos": t.get("campos", [])} for c, t in TIPOS.items()]
+    return [{"codigo": c, "nome": t["nome"], "descricao": t.get("descricao", ""),
+             "prioridade": t.get("prioridade", "media"), "campos": t.get("campos", []),
+             "validade": t.get("validade")} for c, t in TIPOS.items()]
 
 
 @router.get("/documentos", response_model=list[DocumentoOut])

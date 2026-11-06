@@ -99,7 +99,8 @@ class ClienteOpenAICompat:
         self.multimodal = multimodal
         self.chars_por_parte = chars_por_parte
         self.http = httpx.Client(timeout=timeout, headers={"Authorization": f"Bearer {api_key or 'none'}"})
-        tipos = "\n".join(f"- {c}: {t['nome']}" for c, t in TIPOS.items())
+        # a descrição em linguagem natural de cada tipo é a maior alavanca de precisão do modelo
+        tipos = "\n".join(f"- {c}: {t['nome']} — {t.get('descricao', '')}".rstrip(" —") for c, t in TIPOS.items())
         self.sistema = PROMPT_SISTEMA.format(tipos=tipos, desconhecido=DESCONHECIDO)
 
     def _chat(self, sistema: str, conteudo_usuario) -> dict:
