@@ -8,6 +8,7 @@ import io
 import json
 import logging
 import re
+import time
 
 import httpx
 from PIL import Image
@@ -119,9 +120,15 @@ class ClienteOpenAICompat:
             "messages": [{"role": "system", "content": sistema},
                          {"role": "user", "content": conteudo_usuario}],
         }
-        r = self.http.post(f"{self.base_url}/chat/completions", json=corpo)
-        r.raise_for_status()
-        return _extrair_json(r.json()["choices"][0]["message"]["content"])
+        # limite de requisições (429) ou serviço sobrecarregado (503): espera e tenta de novo (2 s, depois 5 s)
+        for espera in (2, 5, None):
+            r = self.http.post(f"{self.base_url}/chat/completions", json=corpo)
+            if r.status_code in (429, 503) and espera is not None:
+                log.info("modelo respondeu %s; nova tentativa em %ss", r.status_code, espera)
+                time.sleep(espera)
+                continue
+            r.raise_for_status()
+            return _extrair_json(r.json()["choices"][0]["message"]["content"])
 
     # ------------------------------------------------------------ resumo
     def resumir(self, tipo_nome: str, campos: list[str], texto: str) -> RespostaResumo | None:
