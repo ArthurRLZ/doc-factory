@@ -157,11 +157,14 @@ def segmentar_e_montar(db: Session, lote: Lote) -> None:
 
     novos = []
     try:
-        for ordem, dp in enumerate(segmentar(infos, obter_limiar(db))):
+        regras = [dict(r, texto=item.get("texto")) for item in (lote.regras_aplicadas or [])
+                  for r in item.get("estruturada", [])]
+        for ordem, dp in enumerate(segmentar(infos, obter_limiar(db), regras)):
             doc = Documento(lote_id=lote.id, ordem=ordem, tipo=dp.tipo,
                             pagina_inicio=min(dp.paginas), pagina_fim=max(dp.paginas),
                             confianca=dp.confianca, motivos=dp.motivos,
-                            status_revisao=StatusRevisao.PENDENTE if dp.revisao else StatusRevisao.AUTO_APROVADO)
+                            status_revisao=StatusRevisao.PENDENTE if dp.revisao else StatusRevisao.AUTO_APROVADO,
+                            regras_aplicadas=dp.regras_aplicadas or None)
             db.add(doc)
             db.flush()
             novos.extend((key_documento(lote.id, doc.id), key_documento(lote.id, doc.id, anon=True)))

@@ -61,6 +61,8 @@ class Lote(Base):
     llm_chamadas_outras: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     llm_paginas: Mapped[int] = mapped_column(Integer, default=0, server_default="0")   # páginas que consultaram a IA
     gabarito: Mapped[list | None] = mapped_column(JSON)    # verdade conhecida do lote (F5): [{"tipo","paginas"}]
+    # regras de separação em vigor no upload (F4): [{"texto", "estruturada": [...]}] — reprocessar usa o mesmo retrato
+    regras_aplicadas: Mapped[list | None] = mapped_column(JSON)
 
     paginas: Mapped[list["Pagina"]] = relationship(back_populates="lote", cascade="all, delete-orphan",
                                                    order_by="Pagina.numero")
@@ -177,6 +179,7 @@ class Documento(Base):
     validade_evidencia: Mapped[str | None] = mapped_column(String(500))
     # quem decidiu o tipo: regra | ia | combinado | humano (app/pipeline/explicabilidade.py)
     decidido_por: Mapped[str | None] = mapped_column(String(12))
+    regras_aplicadas: Mapped[list | None] = mapped_column(JSON)       # textos das regras que mudaram a separação
     ia_justificativa: Mapped[str | None] = mapped_column(String(500))
     criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=agora)
 
@@ -248,6 +251,19 @@ class Configuracao(Base):
     valor: Mapped[str] = mapped_column(String(500))
     alterado_por: Mapped[str | None] = mapped_column(String(100))
     alterado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=agora, onupdate=agora)
+
+
+class RegraSeparacao(Base):
+    """Regra de separação escrita em português e já convertida para o vocabulário fechado (F4)."""
+    __tablename__ = "regras_separacao"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    texto: Mapped[str] = mapped_column(String(500))
+    estruturada: Mapped[list] = mapped_column(JSON)
+    interpretada_por: Mapped[str] = mapped_column(String(20))          # ia | palavras_chave
+    ativa: Mapped[bool] = mapped_column(Boolean, default=True)
+    criada_por: Mapped[str | None] = mapped_column(String(100))
+    criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=agora)
 
 
 class Usuario(Base):

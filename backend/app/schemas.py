@@ -32,6 +32,7 @@ class LoteOut(BaseModel):
     erro: str | None = None
     criado_em: datetime
     ia: dict | None = None        # uso de IA na última execução (Lote.ia)
+    regras_aplicadas: list[dict] | None = None   # regras de separação em vigor neste lote
 
     _p = field_validator("prioridade", mode="before")(_prioridade_texto)
 
@@ -99,6 +100,7 @@ class DocumentoOut(BaseModel):
     decidido_por: str | None = None               # regra | ia | combinado | humano
     origem_texto: str | None = None               # o mesmo, em português para a tela
     ia_justificativa: str | None = None
+    regras_aplicadas: list[str] | None = None     # regras de separação que mudaram a decisão neste documento
 
     _p = field_validator("prioridade", mode="before")(_prioridade_texto)
 

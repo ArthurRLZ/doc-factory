@@ -4,9 +4,9 @@ from sqlalchemy import create_engine, text
 # colunas acrescentadas a tabelas JÁ EXISTENTES (tabelas novas são criadas por create_all)
 NOVAS = [
     "lotes.llm_chamadas_classificacao", "lotes.llm_chamadas_resumo", "lotes.llm_chamadas_outras",
-    "lotes.llm_paginas", "lotes.gabarito",
+    "lotes.llm_paginas", "lotes.gabarito", "lotes.regras_aplicadas",
     "paginas.llm_chamado",
-    "documentos.decidido_por", "documentos.ia_justificativa",
+    "documentos.decidido_por", "documentos.ia_justificativa", "documentos.regras_aplicadas",
 ]
 
 

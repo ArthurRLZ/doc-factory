@@ -17,9 +17,9 @@ from app.api.deps import UsuarioAtual, admin, analista, revisor
 from app.api.documentos import doc_out
 from app.config import settings
 from app.db import get_db
-from app.llm import contador
-from app.models import Lote, Pagina, Revisao, Trabalhador, VersaoLote, novo_id
-from app.pipeline import avaliacao, fraude, privacidade, rasterizar
+from app.llm import contador, obter_llm
+from app.models import Lote, Pagina, RegraSeparacao, Revisao, Trabalhador, VersaoLote, novo_id
+from app.pipeline import avaliacao, fraude, privacidade, rasterizar, regras_separacao
 from app.pipeline.rasterizar import contar_paginas
 from app.schemas import DocumentoOut, LoteOut, PaginaOut
 from app.status import StatusLote, StatusPagina
@@ -92,6 +92,8 @@ def _validar_arquivo(caminho: str, ext: str) -> int:
 @router.post("", response_model=LoteOut, status_code=201)
 async def criar_lote(arquivo: UploadFile = File(...), nome: str | None = Form(None),
                      prioridade: str = Form("media", description="alta | media | baixa — lotes de prioridade alta são processados primeiro"),
+                     regras: str | None = Form(None, max_length=2000,
+                                               description="regras de separação em português SÓ para este lote"),
                      db: Session = Depends(get_db), u: UsuarioAtual = Depends(analista)):
     prioridade = (prioridade or "media").lower().replace("normal", "media")
     if prioridade not in PRIORIDADES:
@@ -119,7 +121,8 @@ async def criar_lote(arquivo: UploadFile = File(...), nome: str | None = Form(No
     lote = Lote(id=lote_id, nome=nome or arquivo.filename or "lote", arquivo_key=key, hash_sha256=digest,
                 mime=MIMES.get(ext, "application/octet-stream"), tamanho_bytes=tamanho,
                 total_paginas=n, status=StatusLote.PROCESSANDO, prioridade=PRIORIDADES[prioridade],
-                enviado_por=u.login, alertas=alertas_arquivo)
+                enviado_por=u.login, alertas=alertas_arquivo,
+                regras_aplicadas=retrato_das_regras(db, regras))
     db.add(lote)
     db.add_all(Pagina(lote_id=lote_id, numero=i) for i in range(n))   # fila de trabalho = as páginas
     try:
@@ -138,6 +141,18 @@ async def criar_lote(arquivo: UploadFile = File(...), nome: str | None = Form(No
 @router.get("", response_model=list[LoteOut])
 def listar_lotes(db: Session = Depends(get_db), _u: UsuarioAtual = Depends(analista)):
     return [lote_out(db, lt) for lt in db.scalars(select(Lote).order_by(Lote.criado_em.desc()).limit(100))]
+
+
+def retrato_das_regras(db: Session, texto_extra: str | None = None) -> list[dict]:
+    """Regras ativas agora (+ as escritas no upload, só para este lote): o lote guarda o retrato, e reprocessar
+    dá o mesmo resultado mesmo que alguém mude as regras depois."""
+    retrato = [{"texto": r.texto, "estruturada": r.estruturada}
+               for r in db.scalars(select(RegraSeparacao).where(RegraSeparacao.ativa.is_(True)).order_by(RegraSeparacao.id))]
+    if texto_extra and texto_extra.strip():
+        estruturada, _ = regras_separacao.interpretar(texto_extra, obter_llm())
+        if estruturada:
+            retrato.append({"texto": texto_extra.strip()[:500], "estruturada": estruturada})
+    return retrato
 
 
 def _obter(db: Session, lote_id: str) -> Lote:
@@ -163,8 +178,10 @@ def documentos_do_lote(lote_id: str, db: Session = Depends(get_db), _u: UsuarioA
 
 
 @router.post("/{lote_id}/reprocessar", response_model=LoteOut)
-def reprocessar(lote_id: str, tudo: bool = False, db: Session = Depends(get_db), u: UsuarioAtual = Depends(revisor)):
-    """Recoloca na fila as páginas que falharam (ou todas, com ?tudo=true)."""
+def reprocessar(lote_id: str, tudo: bool = False, atualizar_regras: bool = False, db: Session = Depends(get_db),
+                u: UsuarioAtual = Depends(revisor)):
+    """Recoloca na fila as páginas que falharam (ou todas, com ?tudo=true). Usa o retrato de regras de separação
+    do lote; ?atualizar_regras=true troca pelo retrato das regras ativas agora."""
     lote = _obter(db, lote_id)
     if lote.status in ("processando", "segmentando"):
         raise HTTPException(409, "Aguarde o processamento atual terminar.")
@@ -184,7 +201,9 @@ def reprocessar(lote_id: str, tudo: bool = False, db: Session = Depends(get_db),
         })
         db.add(versao)
     numeros = list(db.scalars(select(Pagina.numero).where(*cond)))
-    contador.zerar(db, lote_id, numeros)          # o contador de IA reflete só a última execução
+    contador.zerar(db, lote_id, numeros)
+    if atualizar_regras:
+        lote.regras_aplicadas = retrato_das_regras(db)          # o contador de IA reflete só a última execução
     db.execute(update(Pagina).where(*cond).values(status=StatusPagina.PENDENTE, tentativas=0, erro=None))
     lote.status, lote.erro = StatusLote.PROCESSANDO, None
     db.commit()
