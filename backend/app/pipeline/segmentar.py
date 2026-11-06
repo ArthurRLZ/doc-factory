@@ -91,7 +91,7 @@ def _tipo_votado(infos: list[PaginaInfo]) -> tuple[str, float]:
     return vencedor, media * participacao
 
 
-def _fechar(doc: DocProposto) -> DocProposto:
+def _fechar(doc: DocProposto, limiar: float) -> DocProposto:
     doc.tipo, conf_tipo = _tipo_votado(doc._infos)
     conf = min([conf_tipo] + doc._cortes)
 
@@ -114,13 +114,14 @@ def _fechar(doc: DocProposto) -> DocProposto:
         doc.motivos.append("tipo não identificado")
 
     doc.confianca = round(conf, 3)
-    if doc.confianca < settings.LIMIAR_REVISAO and not doc.motivos:
-        doc.motivos.append(f"confiança {doc.confianca:.2f} abaixo do limiar de revisão ({settings.LIMIAR_REVISAO:.2f})")
-    doc.revisao = doc.confianca < settings.LIMIAR_REVISAO or doc.tipo == DESCONHECIDO or bool(doc.motivos)
+    if doc.confianca < limiar and not doc.motivos:
+        doc.motivos.append(f"confiança {doc.confianca:.2f} abaixo do limiar de revisão ({limiar:.2f})")
+    doc.revisao = doc.confianca < limiar or doc.tipo == DESCONHECIDO or bool(doc.motivos)
     return doc
 
 
-def segmentar(paginas: list[PaginaInfo]) -> list[DocProposto]:
+def segmentar(paginas: list[PaginaInfo], limiar: float | None = None) -> list[DocProposto]:
+    limiar = settings.LIMIAR_REVISAO if limiar is None else limiar
     docs: list[DocProposto] = []
     atual: DocProposto | None = None
     forcar_novo = False
@@ -128,7 +129,7 @@ def segmentar(paginas: list[PaginaInfo]) -> list[DocProposto]:
     for p in sorted(paginas, key=lambda i: i.numero):
         if p.em_branco and settings.BRANCO_COMO_SEPARADOR:
             if atual:
-                docs.append(_fechar(atual))
+                docs.append(_fechar(atual, limiar))
                 atual = None
             forcar_novo = True
             continue  # página separadora não entra em nenhum documento
@@ -137,7 +138,7 @@ def segmentar(paginas: list[PaginaInfo]) -> list[DocProposto]:
         forcar_novo = False
         if novo:
             if atual:
-                docs.append(_fechar(atual))
+                docs.append(_fechar(atual, limiar))
             atual = DocProposto()
         atual.paginas.append(p.numero)
         atual._infos.append(p)
@@ -146,5 +147,5 @@ def segmentar(paginas: list[PaginaInfo]) -> list[DocProposto]:
             atual.motivos.append(alerta)
 
     if atual:
-        docs.append(_fechar(atual))
+        docs.append(_fechar(atual, limiar))
     return docs

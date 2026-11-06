@@ -12,6 +12,7 @@ from app.config import settings
 from app.llm import obter_llm
 from app.models import Documento, Lote, Pagina, agora
 from app.pipeline import rasterizar
+from app.pipeline.automacao import obter_limiar
 from app.pipeline.anonimizar import indices_sensiveis, mascarar_texto, tarjar_imagem
 from app.pipeline.classificar import (classificar_por_regras, combinar,
                                       sinais_de_inicio, texto_do_topo)
@@ -133,7 +134,7 @@ def segmentar_e_montar(db: Session, lote: Lote) -> None:
              for p in lote.paginas]
     por_numero = {p.numero: p for p in lote.paginas}
 
-    for ordem, dp in enumerate(segmentar(infos)):
+    for ordem, dp in enumerate(segmentar(infos, obter_limiar(db))):
         doc = Documento(lote_id=lote.id, ordem=ordem, tipo=dp.tipo,
                         pagina_inicio=min(dp.paginas), pagina_fim=max(dp.paginas),
                         confianca=dp.confianca, motivos=dp.motivos,

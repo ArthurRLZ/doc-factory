@@ -110,3 +110,14 @@ const { data: lote } = await api.post('/lotes', form, {
 
 Outros: `GET /lotes` (lista) · `GET /lotes/{id}/documentos` · `GET /lotes/{id}/zip` (todos os PDFs + manifesto) ·
 `GET /vencimentos?ate_dias=30` · `GET /busca?q=` · `GET /health`.
+
+## Meta de automação (para o pitch e para uma tela de configuração)
+
+- `GET /automacao` → `{limiar_atual, curva: [{limiar, automaticos, para_revisao, percentual_automatico,
+  acuracia_estimada (null sem amostra), amostra, atual}], acuracia_medida: {documentos_revisados, corretos, percentual}}`.
+  Gráfico sugerido: eixo X = limiar, barras = `percentual_automatico`, linha = `acuracia_estimada`.
+- `GET /automacao/sugerir?meta=95` → menor limiar que atinge a acurácia-meta pelas revisões já feitas.
+- `PUT /automacao/limiar` (admin) `{"limiar": 0.85, "aplicar": true}` → muda na hora e reavalia a fila.
+
+A acurácia é **medida** pelas revisões humanas (aprovado sem mudança = acerto; tipo trocado, dividido ou
+juntado = erro). Sem revisões suficientes ela vem `null` — o sistema não inventa número.

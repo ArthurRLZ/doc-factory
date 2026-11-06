@@ -153,6 +153,16 @@ class Revisao(Base):
     documento: Mapped[Documento | None] = relationship(back_populates="revisoes")
 
 
+class Configuracao(Base):
+    """Ajustes feitos em tempo de execução (ex.: limiar de revisão), valem para API e workers."""
+    __tablename__ = "configuracoes"
+
+    chave: Mapped[str] = mapped_column(String(100), primary_key=True)
+    valor: Mapped[str] = mapped_column(String(500))
+    alterado_por: Mapped[str | None] = mapped_column(String(100))
+    alterado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=agora, onupdate=agora)
+
+
 class Usuario(Base):
     """Login com perfis: analista (envia e consulta) < revisor (revisa) < admin (gerencia usuários)."""
     __tablename__ = "usuarios"
