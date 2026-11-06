@@ -137,3 +137,22 @@ O trabalhador é identificado pela **impressão digital do CPF** — o CPF não 
 - `/painel` traz `trabalhadores_irregulares` e um item em `atencao` com `tipo: "trabalhadores_irregulares"`.
 
 Documentos exigidos: `DOCUMENTOS_EXIGIDOS_TRABALHADOR` em `backend/app/tipos.py` (identidade, CTPS, ASO, ficha de EPI).
+
+## Sinais de fraude (veredito com evidência)
+
+Cada documento traz `risco: "confiavel" | "atencao" | "alto_risco"` e `alertas: [{codigo, gravidade (media/alta),
+mensagem, evidencia}]`. Sugestão de selo: Confiável (verde) · Atenção (amarelo) · Alto risco (vermelho), mostrando
+`mensagem` + `evidencia` ao passar o mouse. Códigos: `pdf_editado`, `pdf_modificado`, `repetido`,
+`paginas_misturadas`, `data_futura`, `validade_invertida`. Alto risco já vai para a fila de revisão.
+
+- Filtro: `GET /documentos?risco=alto_risco`. O lote também traz `alertas` (metadados do arquivo enviado).
+- `/painel`: `documentos_suspeitos` e item em `atencao` com `tipo: "fraude"`.
+
+## Aprender com as correções
+
+Toda vez que o revisor usa `alterar_tipo`, o sistema aprende: o título do documento vira regra (vale mesmo sem
+modelo) e o trecho anonimizado vira exemplo para o modelo.
+
+- `GET /aprendizados` → `[{id, titulo, tipo_errado, tipo_certo, usuario, usos, ativo, criado_em}]`
+  (`usos` = quantas páginas já foram decididas por esse aprendizado).
+- `POST /aprendizados/{id}/desativar` (admin) → desfaz uma correção feita por engano.

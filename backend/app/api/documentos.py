@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import UsuarioAtual, analista, revisor
 from app.db import E_POSTGRES, get_db
 from app.models import Documento, Pagina, Revisao
-from app.pipeline import validade
+from app.pipeline import aprendizado, validade
 from app.pipeline.orquestrador import atribuir_trabalhador, gerar_arquivos
 from app.pipeline.resumir import nome_prioridade, resumir_documento
 from app.config import settings
@@ -67,7 +67,8 @@ Ordem = Literal["recentes", "prazo", "prioridade", "confianca"]
 @router.get("/documentos", response_model=PaginaDocumentos)
 def listar_documentos(tipo: str | None = None, setor: str | None = None, prioridade: Prioridade | None = None,
                       status_revisao: str | None = None, prazo: Prazo | None = None, lote_id: str | None = None,
-                      q: str | None = None, ordenar: Ordem = "recentes", pagina: int = 1, por_pagina: int = 20,
+                      q: str | None = None, risco: Literal["confiavel", "atencao", "alto_risco"] | None = None,
+                      ordenar: Ordem = "recentes", pagina: int = 1, por_pagina: int = 20,
                       db: Session = Depends(get_db), _u: UsuarioAtual = Depends(analista)):
     """Lista documentos de todos os lotes — filtros da tela "Documentos" (setor, prioridade, tipo, prazo e busca).
 
@@ -86,6 +87,8 @@ def listar_documentos(tipo: str | None = None, setor: str | None = None, priorid
         cond.append(Documento.status_revisao == status_revisao)
     if lote_id:
         cond.append(Documento.lote_id == lote_id)
+    if risco:
+        cond.append(Documento.risco == risco)
     if q and q.strip():
         termo = f"%{q.strip()}%"
         cond.append(or_(Documento.titulo.ilike(termo), Documento.texto.ilike(termo), Documento.resumo.ilike(termo),
@@ -199,6 +202,7 @@ def revisar(doc_id: str, r: RevisaoIn, db: Session = Depends(get_db), u: Usuario
     elif r.acao == "alterar_tipo":
         if r.tipo not in TIPOS:
             raise HTTPException(422, f"tipo deve ser um de {list(TIPOS)}")
+        aprendizado.registrar(db, d, d.tipo, r.tipo, usuario)   # o sistema aprende com a correção
         d.tipo, d.status_revisao = r.tipo, "revisado"
         atribuir_trabalhador(db, d, _paginas(db, d.id))      # o tipo decide se entra no dossiê
         resumir_documento(lote, d)

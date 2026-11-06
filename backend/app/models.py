@@ -37,6 +37,7 @@ class Lote(Base):
     erro: Mapped[str | None] = mapped_column(Text)
     # 1 baixa · 2 normal · 3 alta — o worker atende primeiro os lotes de prioridade maior
     prioridade: Mapped[int] = mapped_column(Integer, default=2, server_default="2", index=True)
+    alertas: Mapped[list | None] = mapped_column(JSON)               # sinais de fraude do ARQUIVO (metadados)
     enviado_por: Mapped[str | None] = mapped_column(String(100))
     criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=agora)
     atualizado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=agora, onupdate=agora)
@@ -119,6 +120,10 @@ class Documento(Base):
     prioridade_motivo: Mapped[str | None] = mapped_column(String(300))
     titulo: Mapped[str | None] = mapped_column(String(200))           # título lido no documento (p/ a tela)
     trabalhador_id: Mapped[int | None] = mapped_column(ForeignKey("trabalhadores.id", ondelete="SET NULL"), index=True)
+    # sinais de fraude: confiavel | atencao | alto_risco, com a lista de alertas (código, gravidade, evidência)
+    risco: Mapped[str] = mapped_column(String(20), default="confiavel", server_default="confiavel", index=True)
+    alertas: Mapped[list | None] = mapped_column(JSON)
+    texto_hash: Mapped[str | None] = mapped_column(String(64), index=True)   # detecta documento repetido
 
     # validade / vigência (o status — vigente, vencendo, vencido — é calculado na leitura, com a data de hoje)
     validade_data: Mapped[date | None] = mapped_column(Date, index=True)
@@ -169,6 +174,22 @@ class Revisao(Base):
     em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=agora)
 
     documento: Mapped[Documento | None] = relationship(back_populates="revisoes")
+
+
+class Aprendizado(Base):
+    """O que o sistema aprendeu com uma correção humana de tipo (vira regra e exemplo para o modelo)."""
+    __tablename__ = "aprendizados"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    titulo: Mapped[str] = mapped_column(String(200), index=True)      # título normalizado (sem acento, minúsculo)
+    tipo_errado: Mapped[str | None] = mapped_column(String(50))
+    tipo_certo: Mapped[str] = mapped_column(String(50))
+    exemplo: Mapped[str | None] = mapped_column(Text)                # trecho do texto JÁ anonimizado
+    documento_id: Mapped[str | None] = mapped_column(String(32))
+    usuario: Mapped[str] = mapped_column(String(100))
+    usos: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    ativo: Mapped[bool] = mapped_column(Boolean, default=True)
+    criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=agora)
 
 
 class Configuracao(Base):

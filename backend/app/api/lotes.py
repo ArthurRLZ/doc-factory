@@ -15,6 +15,7 @@ from app.api.deps import UsuarioAtual, analista, revisor
 from app.config import settings
 from app.db import get_db
 from app.models import Lote, Pagina, novo_id
+from app.pipeline import fraude
 from app.pipeline.rasterizar import contar_paginas
 from app.schemas import DocumentoOut, LoteOut, PaginaOut
 from app.storage import get_storage, key_original
@@ -70,6 +71,7 @@ async def criar_lote(arquivo: UploadFile = File(...), nome: str | None = Form(No
             raise HTTPException(422, f"Não consegui abrir o arquivo: {e}")
         if n == 0:
             raise HTTPException(422, "Arquivo sem páginas")
+        alertas_arquivo = fraude.analisar_pdf(tmp)        # metadados do PDF (editor, modificação)
 
         lote_id = novo_id()
         key = key_original(lote_id, ext)
@@ -81,7 +83,7 @@ async def criar_lote(arquivo: UploadFile = File(...), nome: str | None = Form(No
     lote = Lote(id=lote_id, nome=nome or arquivo.filename or "lote", arquivo_key=key, hash_sha256=digest,
                 mime=MIMES.get(ext, "application/octet-stream"), tamanho_bytes=tamanho,
                 total_paginas=n, status="processando", prioridade=PRIORIDADES[prioridade],
-                enviado_por=u.login)
+                enviado_por=u.login, alertas=alertas_arquivo)
     db.add(lote)
     db.add_all(Pagina(lote_id=lote_id, numero=i) for i in range(n))   # fila de trabalho = as páginas
     db.commit()

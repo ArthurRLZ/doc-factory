@@ -22,7 +22,8 @@ class RespostaResumo:
 
 
 class ClassificadorLLM(Protocol):
-    def classificar(self, texto: str, imagem_png: bytes | None, contexto_anterior: str | None) -> RespostaLLM | None:
+    def classificar(self, texto: str, imagem_png: bytes | None, contexto_anterior: str | None,
+                    exemplos: list[tuple[str, str]] | None = None) -> RespostaLLM | None:
         """Retorna None em caso de falha (o pipeline segue só com as regras)."""
         ...
 

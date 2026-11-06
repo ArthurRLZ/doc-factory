@@ -170,10 +170,15 @@ class ClienteOpenAICompat:
                               partes=n_partes, validade=validade)
 
     # ------------------------------------------------------------ classificação
-    def classificar(self, texto, imagem_png, contexto_anterior):
+    def classificar(self, texto, imagem_png, contexto_anterior, exemplos=None):
+        # correções feitas por revisores humanos: o modelo aprende com elas (texto já anonimizado)
+        bloco_exemplos = ""
+        if exemplos:
+            bloco_exemplos = "EXEMPLOS CORRIGIDOS POR REVISORES (siga estes casos):\n" + "\n".join(
+                f'- tipo correto {tipo}: "{trecho[:300]}"' for tipo, trecho in exemplos) + "\n\n"
         conteudo_usuario: list[dict] = [{
             "type": "text",
-            "text": (f"PÁGINA ANTERIOR: {contexto_anterior or '(esta é a primeira página do lote)'}\n\n"
+            "text": (f"{bloco_exemplos}PÁGINA ANTERIOR: {contexto_anterior or '(esta é a primeira página do lote)'}\n\n"
                      f"TEXTO OCR DESTA PÁGINA:\n{(texto or '')[:6000]}"),
         }]
         if self.multimodal and imagem_png:

@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.llm import obter_llm
 from app.models import Documento, Lote, Pagina, Trabalhador, agora
-from app.pipeline import identidade, rasterizar
+from app.pipeline import aprendizado, fraude, identidade, rasterizar
 from app.pipeline.automacao import obter_limiar
 from app.pipeline.anonimizar import indices_sensiveis, mascarar_texto, tarjar_imagem
 from app.pipeline.classificar import (classificar_por_regras, combinar,
@@ -62,14 +62,17 @@ def processar_pagina(db: Session, pagina_id: int) -> None:
         p.tipo, p.confianca, p.tipo_regra, p.conf_regra, p.sinais = DESCONHECIDO, 0.0, DESCONHECIDO, 0.0, {}
     else:
         topo = texto_do_topo(palavras, r.altura_pt)
-        regra = classificar_por_regras(texto or "", topo)
+        regra = classificar_por_regras(texto or "", topo, aprendizado.regras(db))
         p.tipo_regra, p.conf_regra = regra.tipo, regra.confianca
         p.sinais = sinais_de_inicio(texto or "", topo) | {"scores": regra.scores}
+        if regra.aprendizado_id:            # uma correção humana anterior decidiu esta página
+            p.sinais = p.sinais | {"aprendizado": regra.aprendizado_id}
+            aprendizado.contar_uso(db, regra.aprendizado_id)
 
         llm = obter_llm()
         if llm and (settings.LLM_SEMPRE or regra.confianca < settings.LIMIAR_LLM):
             imagem_segura = tarjar_imagem(r.png, palavras, indices_sensiveis(palavras), settings.DPI_OCR)
-            resp = llm.classificar(p.texto, imagem_segura, _contexto_anterior(db, p))
+            resp = llm.classificar(p.texto, imagem_segura, _contexto_anterior(db, p), aprendizado.exemplos(db))
             if resp:
                 p.tipo_llm, p.conf_llm, p.inicio_llm = resp.tipo, resp.confianca, resp.inicio_documento
                 p.sinais = p.sinais | {"llm_justificativa": resp.justificativa}
@@ -150,6 +153,8 @@ def segmentar_e_montar(db: Session, lote: Lote) -> None:
         gerar_arquivos(lote, doc, pags)
         atribuir_trabalhador(db, doc, pags)
         resumir_documento(lote, doc)
+        db.flush()
+        fraude.aplicar(db, lote, doc, pags)      # depois da validade: usa as datas lidas
     db.commit()
 
 
