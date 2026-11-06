@@ -46,7 +46,8 @@ pytest -q                                               # 66 testes, inclui pont
 ## Rodar a stack completa
 
 ```bash
-docker compose up --build --scale worker=3              # Postgres + MinIO (console :9001) + API + 3 workers
+# da RAIZ do repositório (docker-compose.yml do projeto):
+docker compose up --build --scale worker=3              # Postgres + API + 3 workers + front em :5173
 ```
 
 ## Estrutura

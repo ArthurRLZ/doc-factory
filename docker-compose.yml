@@ -17,8 +17,9 @@ services:
     environment: &env
       DATABASE_URL: postgresql+psycopg://docfactory:docfactory@postgres:5432/docfactory
       STORAGE_BACKEND: local
-      DATA_DIR: /tmp/docfactory
+      DATA_DIR: /data             # volume compartilhado: a API grava o PDF, o worker lê
       WORKER_INLINE: "false"
+    volumes: [dados:/data]
     ports: ["8000:8000"]
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"]
@@ -35,6 +36,7 @@ services:
     command: ["python", "-m", "app.worker"]
     env_file: [{ path: ./backend/.env, required: false }]
     environment: *env
+    volumes: [dados:/data]
     depends_on:
       postgres: { condition: service_healthy }
       api: { condition: service_healthy }
@@ -51,3 +53,4 @@ services:
 
 volumes:
   pgdata:
+  dados:
