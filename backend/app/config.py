@@ -67,6 +67,15 @@ class Settings(BaseSettings):
     PRE_REVISAO_ATIVA: bool = True          # documento pendente ganha explicação + sugestão antes do revisor abrir
     PRE_REVISAO_MAX_POR_LOTE: int = 50      # teto de chamadas de IA de pré-revisão por lote (o resto: por regras)
 
+    # --- Portal do fornecedor (F7): link privado, sem login --------------------------------
+    PORTAL_ATIVO: bool = True
+    PORTAL_URL_BASE: str = "http://localhost:5173"   # o link enviado ao fornecedor é {base}/portal/{token}
+    PORTAL_MAX_UPLOAD_MB: int = 20
+    PORTAL_MAX_PAGINAS: int = 30
+    PORTAL_MAX_ENVIOS_POR_HORA: int = 30   # por link e IP
+    PORTAL_VALIDADE_DIAS: int = 14         # expiração padrão do convite
+    PORTAL_PRIORIDADE: int = 3             # lote do portal passa na frente no worker (veredito rápido)
+
     # --- Alertas de vencimento (F6): o agendador é o laço do worker --------------------------
     ALERTAS_ATIVO: bool = False             # liga o envio automático (1x por dia) dentro do worker
     ALERTAS_MODO: str = "simulado"          # simulado (só registra e loga) | real (envia de verdade)

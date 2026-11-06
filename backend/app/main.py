@@ -13,7 +13,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import func, select
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from app.api import alertas, auth, automacao, documentos, lotes, painel, regras, trabalhadores
+from app.api import alertas, auth, automacao, documentos, lotes, painel, portal_admin, portal_publico, regras, trabalhadores
 from app.api.deps import UsuarioAtual, analista, exigir_api_key
 from app.config import settings
 from app.db import SessionLocal, init_db
@@ -92,6 +92,9 @@ app.include_router(trabalhadores.router, dependencies=protegido)
 app.include_router(trabalhadores.router_funcoes, dependencies=protegido)
 app.include_router(regras.router, dependencies=protegido)
 app.include_router(alertas.router, dependencies=protegido)
+# ordem importa: /portal/convites (interno) antes de /portal/{token} (público, autenticação própria pelo token)
+app.include_router(portal_admin.router, dependencies=protegido)
+app.include_router(portal_publico.router)
 
 
 # ------------------------------------------------------------ erros num formato único para o front

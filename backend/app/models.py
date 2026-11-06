@@ -64,6 +64,9 @@ class Lote(Base):
     gabarito: Mapped[list | None] = mapped_column(JSON)    # verdade conhecida do lote (F5): [{"tipo","paginas"}]
     # regras de separação em vigor no upload (F4): [{"texto", "estruturada": [...]}] — reprocessar usa o mesmo retrato
     regras_aplicadas: Mapped[list | None] = mapped_column(JSON)
+    # portal do fornecedor (F7). convite_id sem FK de propósito: coluna nova em tabela existente (migração leve)
+    origem: Mapped[str] = mapped_column(String(20), default="interno", server_default="interno")
+    convite_id: Mapped[int | None] = mapped_column(Integer)
 
     paginas: Mapped[list["Pagina"]] = relationship(back_populates="lote", cascade="all, delete-orphan",
                                                    order_by="Pagina.numero")
@@ -300,6 +303,23 @@ class AlertaEnviado(Base):
     enviado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=agora)
 
     __table_args__ = (UniqueConstraint("documento_id", "contato_id", "canal", "faixa", name="uq_alerta_unico"),)
+
+
+class ConviteFornecedor(Base):
+    """Link privado do fornecedor (F7). O token só existe na resposta da criação; aqui fica o sha256 dele."""
+    __tablename__ = "convites_fornecedor"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    fornecedor_nome: Mapped[str] = mapped_column(String(200))
+    contato_email: Mapped[str | None] = mapped_column(String(200))
+    exigidos: Mapped[list] = mapped_column(JSON)                      # tipos ou tokens CERTIFICADO_NR:NR-xx
+    expira_em: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    usos_max: Mapped[int] = mapped_column(Integer, default=20)
+    usos: Mapped[int] = mapped_column(Integer, default=0)
+    ativo: Mapped[bool] = mapped_column(Boolean, default=True)
+    criado_por: Mapped[str | None] = mapped_column(String(100))
+    criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=agora)
 
 
 class Usuario(Base):

@@ -18,7 +18,7 @@ from app.api.documentos import doc_out
 from app.config import settings
 from app.db import get_db
 from app.llm import contador, obter_llm
-from app.models import Lote, Pagina, RegraSeparacao, Revisao, Trabalhador, VersaoLote, novo_id
+from app.models import ConviteFornecedor, Lote, Pagina, RegraSeparacao, Revisao, Trabalhador, VersaoLote, novo_id
 from app.pipeline import avaliacao, fraude, privacidade, rasterizar, regras_separacao
 from app.pipeline.rasterizar import contar_paginas
 from app.schemas import DocumentoOut, LoteOut, PaginaOut
@@ -57,6 +57,9 @@ def lote_out(db: Session, lote: Lote) -> LoteOut:
     feitas = db.scalar(select(func.count()).select_from(Pagina)
                        .where(Pagina.lote_id == lote.id, Pagina.status.in_((StatusPagina.OK, StatusPagina.FALHOU)))) or 0
     out = LoteOut.model_validate(lote)
+    if lote.convite_id:
+        convite = db.get(ConviteFornecedor, lote.convite_id)
+        out.fornecedor = convite.fornecedor_nome if convite else None
     out.paginas_processadas = feitas
     out.progresso = round(feitas / lote.total_paginas, 3) if lote.total_paginas else 0.0
     return out
@@ -109,20 +112,33 @@ async def criar_lote(arquivo: UploadFile = File(...), nome: str | None = Form(No
         existente = db.scalar(select(Lote).where(Lote.hash_sha256 == digest))
         if existente:
             raise HTTPException(409, {"mensagem": "Este arquivo já foi enviado", "lote_id": existente.id})
-        n = _validar_arquivo(tmp, ext)
-        alertas_arquivo = fraude.analisar_pdf(tmp)        # metadados do PDF (editor, modificação)
-        lote_id = novo_id()
-        key = key_original(lote_id, ext)
-        get_storage().put_file(key, tmp)
+        lote = criar_lote_de_arquivo(db, nome or arquivo.filename or "lote", tmp, ext, digest, tamanho,
+                                     enviado_por=u.login, prioridade=PRIORIDADES[prioridade], regras_texto=regras)
     finally:
         if os.path.exists(tmp):
             os.unlink(tmp)
+    return lote_out(db, lote)
 
-    lote = Lote(id=lote_id, nome=nome or arquivo.filename or "lote", arquivo_key=key, hash_sha256=digest,
+
+def criar_lote_de_arquivo(db: Session, nome: str, caminho: str, ext: str, digest: str, tamanho: int, *,
+                          enviado_por: str | None, prioridade: int, origem: str = "interno",
+                          convite_id: int | None = None, regras_texto: str | None = None,
+                          max_paginas: int | None = None) -> Lote:
+    """Cria o lote a partir de um arquivo já recebido em disco (upload interno e portal do fornecedor usam esta
+    mesma função): confere o conteúdo, conta páginas, guarda no storage, cria o Lote e a fila de páginas.
+    Recebe um caminho e não bytes: lote de 1 GB nunca vai inteiro para a memória."""
+    n = _validar_arquivo(caminho, ext)
+    if max_paginas and n > max_paginas:
+        raise HTTPException(422, f"Arquivo com {n} páginas; o limite é {max_paginas}")
+    alertas_arquivo = fraude.analisar_pdf(caminho)        # metadados do PDF (editor, modificação)
+    lote_id = novo_id()
+    key = key_original(lote_id, ext)
+    get_storage().put_file(key, caminho)
+    lote = Lote(id=lote_id, nome=nome, arquivo_key=key, hash_sha256=digest,
                 mime=MIMES.get(ext, "application/octet-stream"), tamanho_bytes=tamanho,
-                total_paginas=n, status=StatusLote.PROCESSANDO, prioridade=PRIORIDADES[prioridade],
-                enviado_por=u.login, alertas=alertas_arquivo,
-                regras_aplicadas=retrato_das_regras(db, regras))
+                total_paginas=n, status=StatusLote.PROCESSANDO, prioridade=prioridade,
+                enviado_por=enviado_por, alertas=alertas_arquivo, origem=origem, convite_id=convite_id,
+                regras_aplicadas=retrato_das_regras(db, regras_texto))
     db.add(lote)
     db.add_all(Pagina(lote_id=lote_id, numero=i) for i in range(n))   # fila de trabalho = as páginas
     try:
@@ -132,10 +148,9 @@ async def criar_lote(arquivo: UploadFile = File(...), nome: str | None = Form(No
         try:
             get_storage().delete(key)
         except Exception:
-            import logging
-            logging.getLogger(__name__).exception("Falha ao remover arquivo após erro ao registrar lote")
+            log.exception("Falha ao remover arquivo após erro ao registrar lote")
         raise
-    return lote_out(db, lote)
+    return lote
 
 
 @router.get("", response_model=list[LoteOut])
