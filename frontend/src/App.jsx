@@ -1,17 +1,15 @@
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import Home from './pages/Home/Home';
 import Documents from './pages/Documents/Documents';
+import Reports from './pages/Reports/Reports';
 
 export default function App() {
   return (
     <Router>
       <Routes>
-        {/* Rota principal apontando para a Home */}
         <Route path="/" element={<Home />} />
         <Route path="/documentos" element={<Documents />} />
-        {/* Podes adicionar mais rotas no futuro aqui, como:
-        <Route path="/documentos" element={<Documentos />} />
-        */}
+        <Route path="/relatorios" element={<Reports />} />
       </Routes>
     </Router>
   );
