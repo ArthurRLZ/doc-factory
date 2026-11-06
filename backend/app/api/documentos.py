@@ -1,5 +1,5 @@
 """Documentos, fila de revisão humana, auditoria, resumo, vencimentos e busca."""
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -10,9 +10,10 @@ from sqlalchemy.orm import Session
 from app.api.deps import UsuarioAtual, analista, revisor
 from app.db import E_POSTGRES, get_db
 from app.models import Documento, Pagina, Revisao
-from app.pipeline import aprendizado, validade
+from app.pipeline import aprendizado, fraude, validade
 from app.pipeline.orquestrador import atribuir_trabalhador, gerar_arquivos
 from app.pipeline.resumir import nome_prioridade, resumir_documento
+from app import util
 from app.config import settings
 from app.schemas import (BuscaItem, DocumentoOut, PaginaDocumentos, Prioridade, RevisaoIn, RevisaoOut,
                          TrabalhadorRef, ValidadeOut)
@@ -75,7 +76,7 @@ def listar_documentos(tipo: str | None = None, setor: str | None = None, priorid
     prazo: vencido | vencendo (até VALIDADE_ALERTA_DIAS) | esta_semana (até 7 dias) | vigente | indeterminado | sem_validade
     ordenar: recentes | prazo (vence primeiro) | prioridade (alta primeiro) | confianca (menor primeiro)
     """
-    hoje = date.today()
+    hoje = util.hoje()
     cond = []
     if tipo:
         cond.append(Documento.tipo == tipo)
@@ -130,7 +131,7 @@ def listar_setores(_u: UsuarioAtual = Depends(analista)):
 def vencimentos(ate_dias: int = 30, incluir_vencidos: bool = True, lote_id: str | None = None,
                 db: Session = Depends(get_db), _u: UsuarioAtual = Depends(analista)):
     """Documentos que vencem nos próximos `ate_dias` dias (e os já vencidos), do mais urgente ao menos."""
-    hoje = date.today()
+    hoje = util.hoje()
     q = select(Documento).where(Documento.validade_data.is_not(None),
                                 Documento.validade_data <= hoje + timedelta(days=max(0, ate_dias)))
     if not incluir_vencidos:
@@ -158,7 +159,7 @@ def baixar_pdf(doc_id: str, anonimizado: bool = True, db: Session = Depends(get_
         raise HTTPException(404, "PDF ainda não gerado")
     nome = f"{d.ordem + 1:03d}_{d.tipo.lower()}{'_anon' if anonimizado else ''}.pdf"
     return Response(get_storage().get_bytes(key), media_type="application/pdf",
-                    headers={"Content-Disposition": f'inline; filename="{nome}"'})
+                    headers={"Content-Disposition": util.content_disposition(nome, inline=True)})
 
 
 @router.get("/documentos/{doc_id}/revisoes", response_model=list[RevisaoOut])
@@ -211,6 +212,7 @@ def revisar(doc_id: str, r: RevisaoIn, db: Session = Depends(get_db), u: Usuario
         if r.prioridade is None:
             raise HTTPException(422, "informe prioridade: alta, media ou baixa")
         d.prioridade, d.prioridade_motivo = PRIORIDADES[r.prioridade], f"definida manualmente por {usuario}"
+        d.prioridade_manual = True
 
     elif r.acao == "dividir":
         pags = _paginas(db, d.id)
@@ -254,6 +256,10 @@ def revisar(doc_id: str, r: RevisaoIn, db: Session = Depends(get_db), u: Usuario
         atribuir_trabalhador(db, d, _paginas(db, d.id))
         resumir_documento(lote, d)
 
+    if r.acao in ("dividir", "juntar_proximo", "alterar_tipo"):
+        db.flush()
+        for x in afetados:                 # conteúdo ou datas mudaram: sinais de fraude de novo
+            fraude.aplicar(db, lote, x, _paginas(db, x.id))
     db.add(Revisao(documento_id=d.id, lote_id=lote.id, usuario=usuario, acao=r.acao,
                    antes=antes, depois=_snapshot(d)))
     db.commit()

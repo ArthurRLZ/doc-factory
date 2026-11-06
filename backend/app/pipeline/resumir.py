@@ -99,16 +99,19 @@ def resumir_documento(lote: Lote, doc: Documento) -> None:
             resp = llm.resumir(nome_tipo(doc.tipo), campos_do_tipo(doc.tipo), doc.texto)
 
     status_v, dias = _aplicar_validade(doc, resp.validade if resp else None)
+    manual = doc.prioridade_manual          # prioridade definida pelo revisor não é sobrescrita
     if resp:
         doc.resumo, doc.campos, doc.resumo_origem = resp.resumo, resp.campos, "modelo"
-        doc.prioridade, doc.prioridade_motivo = calcular_prioridade(doc.tipo, lote.prioridade, resp.prioridade,
-                                                                    resp.motivo_prioridade, status_v, dias)
+        if not manual:
+            doc.prioridade, doc.prioridade_motivo = calcular_prioridade(doc.tipo, lote.prioridade, resp.prioridade,
+                                                                        resp.motivo_prioridade, status_v, dias)
     else:
         if settings.RESUMO_ATIVO:
             doc.resumo, doc.campos = resumo_simples(doc.tipo, doc.texto or "", n_paginas)
             doc.resumo_origem = "simples"
-        doc.prioridade, doc.prioridade_motivo = calcular_prioridade(doc.tipo, lote.prioridade, None,
-                                                                    status_validade=status_v, dias=dias)
+        if not manual:
+            doc.prioridade, doc.prioridade_motivo = calcular_prioridade(doc.tipo, lote.prioridade, None,
+                                                                        status_validade=status_v, dias=dias)
 
 
 def nome_prioridade(valor: int | None) -> str:

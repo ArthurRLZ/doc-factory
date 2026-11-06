@@ -4,26 +4,32 @@
   usando as caixas do Tesseract. Ctrl+F e copiar/colar funcionam.
 - PDF anonimizado: mesmo PDF + redaction real (apaga texto E pixels da imagem).
 """
+import logging
+
 import pymupdf
 
 from app.pipeline.anonimizar import indices_sensiveis
 from app.storage import Storage
 
 FONTE = "helv"
+log = logging.getLogger(__name__)
 
 
 def _texto_invisivel(page: pymupdf.Page, palavras: list[dict]) -> None:
+    ignoradas = 0
     for w in palavras:
         largura, altura = w["x1"] - w["x0"], w["y1"] - w["y0"]
         if largura <= 0 or altura <= 0:
             continue
-        comprimento_1pt = pymupdf.get_text_length(w["t"], fontname=FONTE, fontsize=1) or 1
-        fs = max(1.0, min(altura * 0.95, largura / comprimento_1pt))
         try:
+            comprimento_1pt = pymupdf.get_text_length(w["t"], fontname=FONTE, fontsize=1) or 1
+            fs = max(1.0, min(altura * 0.95, largura / comprimento_1pt))
             page.insert_text((w["x0"], w["y1"] - altura * 0.15), w["t"],
                              fontname=FONTE, fontsize=fs, render_mode=3)
-        except Exception:
-            pass  # caractere fora da fonte base: ignora a palavra, não derruba o documento
+        except (ValueError, RuntimeError):
+            ignoradas += 1     # caractere fora da fonte base: ignora a palavra, não derruba o documento
+    if ignoradas:
+        log.info("página: %d palavra(s) sem caractere na fonte ficaram fora da camada de texto", ignoradas)
 
 
 def montar_pdf(storage: Storage, caminho_original: str, paginas: list, anonimizar: bool = False) -> bytes:

@@ -1,5 +1,6 @@
 """Upload e acompanhamento de lotes."""
 import hashlib
+import logging
 import io
 import json
 import os
@@ -11,11 +12,12 @@ from fastapi.responses import Response
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
-from app.api.deps import UsuarioAtual, analista, revisor
+from app import util
+from app.api.deps import UsuarioAtual, admin, analista, revisor
 from app.config import settings
 from app.db import get_db
-from app.models import Lote, Pagina, novo_id
-from app.pipeline import fraude
+from app.models import Lote, Pagina, Revisao, Trabalhador, novo_id
+from app.pipeline import fraude, rasterizar
 from app.pipeline.rasterizar import contar_paginas
 from app.schemas import DocumentoOut, LoteOut, PaginaOut
 from app.storage import get_storage, key_original
@@ -23,6 +25,26 @@ from app.tipos import PRIORIDADES
 from app.api.documentos import doc_out
 
 router = APIRouter(prefix="/lotes", tags=["lotes"])
+log = logging.getLogger(__name__)
+
+# assinatura (primeiros bytes, em hexadecimal) de cada formato aceito: a extensão sozinha não prova nada
+_TIFF = (bytes.fromhex("49492a00"), bytes.fromhex("4d4d002a"))          # II*. (little endian) / MM.* (big endian)
+_JPEG = (bytes.fromhex("ffd8ff"),)
+ASSINATURAS = {
+    ".pdf": (b"%PDF-",),
+    ".tif": _TIFF, ".tiff": _TIFF,
+    ".png": (bytes.fromhex("89504e470d0a1a0a"),),
+    ".jpg": _JPEG, ".jpeg": _JPEG,
+}
+
+
+def conteudo_confere(caminho: str, ext: str) -> bool:
+    with open(caminho, "rb") as f:
+        inicio = f.read(1024)
+    if ext == ".pdf":                      # o PDF pode ter alguns bytes antes do cabeçalho
+        return b"%PDF-" in inicio
+    return any(inicio.startswith(a) for a in ASSINATURAS.get(ext, ()))
+
 
 MIMES = {".pdf": "application/pdf", ".tif": "image/tiff", ".tiff": "image/tiff",
          ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg"}
@@ -65,10 +87,13 @@ async def criar_lote(arquivo: UploadFile = File(...), nome: str | None = Form(No
         if existente:
             raise HTTPException(409, {"mensagem": "Este arquivo já foi enviado", "lote_id": existente.id})
 
+        if not conteudo_confere(tmp, ext):
+            raise HTTPException(415, f"O conteúdo do arquivo não é um {ext.lstrip('.').upper()} de verdade")
         try:
             n = contar_paginas(tmp)
         except Exception as e:
-            raise HTTPException(422, f"Não consegui abrir o arquivo: {e}")
+            log.info("arquivo rejeitado: %s", e)
+            raise HTTPException(422, "Não consegui abrir o arquivo (corrompido ou protegido por senha)") from e
         if n == 0:
             raise HTTPException(422, "Arquivo sem páginas")
         alertas_arquivo = fraude.analisar_pdf(tmp)        # metadados do PDF (editor, modificação)
@@ -86,13 +111,18 @@ async def criar_lote(arquivo: UploadFile = File(...), nome: str | None = Form(No
                 enviado_por=u.login, alertas=alertas_arquivo)
     db.add(lote)
     db.add_all(Pagina(lote_id=lote_id, numero=i) for i in range(n))   # fila de trabalho = as páginas
-    db.commit()
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        get_storage().delete(key)          # não deixa arquivo órfão no storage
+        raise
     return lote_out(db, lote)
 
 
 @router.get("", response_model=list[LoteOut])
 def listar_lotes(db: Session = Depends(get_db), _u: UsuarioAtual = Depends(analista)):
-    return [lote_out(db, l) for l in db.scalars(select(Lote).order_by(Lote.criado_em.desc()).limit(100))]
+    return [lote_out(db, lt) for lt in db.scalars(select(Lote).order_by(Lote.criado_em.desc()).limit(100))]
 
 
 def _obter(db: Session, lote_id: str) -> Lote:
@@ -130,6 +160,29 @@ def reprocessar(lote_id: str, tudo: bool = False, db: Session = Depends(get_db),
     return lote_out(db, lote)
 
 
+@router.delete("/{lote_id}")
+def apagar_lote(lote_id: str, db: Session = Depends(get_db), u: UsuarioAtual = Depends(admin)):
+    """LGPD (direito de eliminação): apaga o lote, as páginas, os documentos, os arquivos no storage e as
+    pessoas que ficarem sem nenhum documento. Fica só um registro de auditoria SEM dados pessoais."""
+    lote = _obter(db, lote_id)
+    if lote.status in ("processando", "segmentando"):
+        raise HTTPException(409, "Lote em processamento; aguarde terminar para apagar")
+    resumo = {"nome": lote.nome, "paginas": lote.total_paginas, "documentos": len(lote.documentos)}
+    caminho = get_storage().caminho_local(lote.arquivo_key) if settings.STORAGE_BACKEND == "local" else None
+    if caminho:
+        rasterizar.fechar(caminho)         # libera o arquivo aberto em cache (no Windows, senão não apaga)
+    pessoas = {d.trabalhador_id for d in lote.documentos if d.trabalhador_id}
+    db.delete(lote)
+    db.flush()
+    for t in db.scalars(select(Trabalhador).where(Trabalhador.id.in_(pessoas))):
+        if not t.documentos:
+            db.delete(t)
+    db.add(Revisao(documento_id=None, lote_id=lote_id, usuario=u.login, acao="lote_apagado", antes=resumo))
+    db.commit()
+    get_storage().delete_prefixo(f"lotes/{lote_id}/")
+    return {"apagado": lote_id} | resumo
+
+
 @router.get("/{lote_id}/zip")
 def baixar_zip(lote_id: str, anonimizado: bool = True, db: Session = Depends(get_db),
                u: UsuarioAtual = Depends(analista)):
@@ -153,7 +206,7 @@ def baixar_zip(lote_id: str, anonimizado: bool = True, db: Session = Depends(get
                                                 ensure_ascii=False, indent=2))
     nome_zip = f"{os.path.splitext(lote.nome)[0]}_documentos.zip"
     return Response(buf.getvalue(), media_type="application/zip",
-                    headers={"Content-Disposition": f'attachment; filename="{nome_zip}"'})
+                    headers={"Content-Disposition": util.content_disposition(nome_zip)})
 
 
 @router.get("/{lote_id}/paginas/{numero}/imagem")

@@ -118,6 +118,7 @@ class Documento(Base):
     # prioridade na fila de revisão: 1 baixa · 2 média · 3 alta
     prioridade: Mapped[int] = mapped_column(Integer, default=2, server_default="2", index=True)
     prioridade_motivo: Mapped[str | None] = mapped_column(String(300))
+    prioridade_manual: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")  # revisor decidiu
     titulo: Mapped[str | None] = mapped_column(String(200))           # título lido no documento (p/ a tela)
     trabalhador_id: Mapped[int | None] = mapped_column(ForeignKey("trabalhadores.id", ondelete="SET NULL"), index=True)
     # sinais de fraude: confiavel | atencao | alto_risco, com a lista de alertas (código, gravidade, evidência)

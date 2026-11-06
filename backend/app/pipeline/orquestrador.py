@@ -42,7 +42,7 @@ def processar_pagina(db: Session, pagina_id: int) -> None:
     if r.nativa:
         palavras, texto, ocr_conf, em_branco = r.palavras_nativas, r.texto_nativo, 100.0, False
     else:
-        o = ocr_png(r.png)
+        o = ocr_png(r.png, r.dpi)
         palavras, texto, ocr_conf = o.palavras, o.texto, o.confianca
         em_branco = e_pagina_em_branco(len(palavras), o.tinta)
 
@@ -71,7 +71,7 @@ def processar_pagina(db: Session, pagina_id: int) -> None:
 
         llm = obter_llm()
         if llm and (settings.LLM_SEMPRE or regra.confianca < settings.LIMIAR_LLM):
-            imagem_segura = tarjar_imagem(r.png, palavras, indices_sensiveis(palavras), settings.DPI_OCR)
+            imagem_segura = tarjar_imagem(r.png, palavras, indices_sensiveis(palavras), r.dpi)
             resp = llm.classificar(p.texto, imagem_segura, _contexto_anterior(db, p), aprendizado.exemplos(db))
             if resp:
                 p.tipo_llm, p.conf_llm, p.inicio_llm = resp.tipo, resp.confianca, resp.inicio_documento

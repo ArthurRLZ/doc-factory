@@ -10,9 +10,9 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app import util
 from app.api.deps import UsuarioAtual, analista
 from app.api.documentos import doc_out
-from app.config import settings
 from app.db import get_db
 from app.models import Documento, Lote, Trabalhador
 from app.pipeline import checklist, validade
@@ -23,7 +23,7 @@ _DIAS_SEMANA = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"]
 
 
 def _fuso() -> timezone:
-    return timezone(timedelta(hours=settings.FUSO_HORAS))
+    return util.fuso()
 
 
 def _local(dt: datetime | None) -> datetime | None:
@@ -35,7 +35,7 @@ def _local(dt: datetime | None) -> datetime | None:
 
 
 def _hoje() -> date:
-    return datetime.now(_fuso()).date()
+    return util.hoje()
 
 
 def _pct(parte: int, total: int) -> float:
