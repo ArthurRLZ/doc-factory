@@ -4,9 +4,9 @@ Regra de ouro: o banco guarda METADADOS. Imagens, PDFs e caixas de palavras
 ficam no storage (disco/MinIO/S3) e o banco guarda só a chave (key) + hash.
 """
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
-from sqlalchemy import (DDL, JSON, Boolean, DateTime, Float, ForeignKey, Index,
+from sqlalchemy import (DDL, JSON, Boolean, Date, DateTime, Float, ForeignKey, Index,
                         Integer, String, Text, event)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -117,10 +117,35 @@ class Documento(Base):
     # prioridade na fila de revisão: 1 baixa · 2 média · 3 alta
     prioridade: Mapped[int] = mapped_column(Integer, default=2, server_default="2", index=True)
     prioridade_motivo: Mapped[str | None] = mapped_column(String(300))
+    titulo: Mapped[str | None] = mapped_column(String(200))           # título lido no documento (p/ a tela)
+    trabalhador_id: Mapped[int | None] = mapped_column(ForeignKey("trabalhadores.id", ondelete="SET NULL"), index=True)
+
+    # validade / vigência (o status — vigente, vencendo, vencido — é calculado na leitura, com a data de hoje)
+    validade_data: Mapped[date | None] = mapped_column(Date, index=True)
+    validade_inicio: Mapped[date | None] = mapped_column(Date)
+    validade_origem: Mapped[str | None] = mapped_column(String(20))   # texto | modelo | regra
+    validade_evidencia: Mapped[str | None] = mapped_column(String(500))
     criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=agora)
 
     lote: Mapped[Lote] = relationship(back_populates="documentos")
     revisoes: Mapped[list["Revisao"]] = relationship(back_populates="documento", cascade="all, delete-orphan")
+    trabalhador: Mapped["Trabalhador | None"] = relationship(back_populates="documentos")
+
+
+class Trabalhador(Base):
+    """Pessoa a quem os documentos pertencem — identificada pela impressão digital do CPF (nunca o CPF)."""
+    __tablename__ = "trabalhadores"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    cpf_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    cpf_mascarado: Mapped[str] = mapped_column(String(20))           # ***.982.247-**
+    criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=agora)
+
+    documentos: Mapped[list[Documento]] = relationship(back_populates="trabalhador")
+
+    @property
+    def rotulo(self) -> str:
+        return f"Trabalhador {self.cpf_mascarado}"
 
 
 # Busca full-text em português com índice GIN (só no PostgreSQL; no SQLite cai para LIKE)
@@ -144,6 +169,16 @@ class Revisao(Base):
     em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=agora)
 
     documento: Mapped[Documento | None] = relationship(back_populates="revisoes")
+
+
+class Configuracao(Base):
+    """Ajustes feitos em tempo de execução (ex.: limiar de revisão), valem para API e workers."""
+    __tablename__ = "configuracoes"
+
+    chave: Mapped[str] = mapped_column(String(100), primary_key=True)
+    valor: Mapped[str] = mapped_column(String(500))
+    alterado_por: Mapped[str | None] = mapped_column(String(100))
+    alterado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=agora, onupdate=agora)
 
 
 class Usuario(Base):

@@ -8,6 +8,7 @@ import io
 import json
 import logging
 import re
+import time
 
 import httpx
 from PIL import Image
@@ -44,10 +45,17 @@ Responda SOMENTE com JSON válido, sem texto fora dele:
 {{"resumo": "<2 a 3 frases objetivas>",
   "campos": {{{campos}}},
   "prioridade": "alta" | "media" | "baixa",
-  "motivo_prioridade": "<até 15 palavras>"}}
+  "motivo_prioridade": "<até 15 palavras>",
+  "validade": {{"data": "dd/mm/aaaa" | null, "inicio": "dd/mm/aaaa" | null,
+               "evidencia": "<trecho COPIADO LITERALMENTE do texto que comprova a data>"}}}}
 
 Prioridade "alta" = exige ação rápida (prazo vencendo, valor alto, pendência, inconsistência);
-"baixa" = só arquivar; "media" = o resto."""
+"baixa" = só arquivar; "media" = o resto.
+
+Validade = até quando o DOCUMENTO vale: "válida até", "validade", vigência de contrato, prazo de certificado.
+Se vier como prazo ("vigência de 12 meses a partir de 05/11/2026"), calcule a data final.
+NÃO é validade: vencimento de pagamento de guia, boleto ou fatura. Sem validade no texto: "data": null.
+A evidência deve ser um trecho que existe no texto, palavra por palavra — ele será conferido."""
 
 PROMPT_PARTE = """Você recebe UMA PARTE de um documento longo em português (texto de OCR, dados pessoais
 mascarados). Resuma esta parte em até 6 frases, preservando nomes de empresas, valores, datas,
@@ -99,7 +107,8 @@ class ClienteOpenAICompat:
         self.multimodal = multimodal
         self.chars_por_parte = chars_por_parte
         self.http = httpx.Client(timeout=timeout, headers={"Authorization": f"Bearer {api_key or 'none'}"})
-        tipos = "\n".join(f"- {c}: {t['nome']}" for c, t in TIPOS.items())
+        # a descrição em linguagem natural de cada tipo é a maior alavanca de precisão do modelo
+        tipos = "\n".join(f"- {c}: {t['nome']} — {t.get('descricao', '')}".rstrip(" —") for c, t in TIPOS.items())
         self.sistema = PROMPT_SISTEMA.format(tipos=tipos, desconhecido=DESCONHECIDO)
 
     def _chat(self, sistema: str, conteudo_usuario) -> dict:
@@ -111,9 +120,15 @@ class ClienteOpenAICompat:
             "messages": [{"role": "system", "content": sistema},
                          {"role": "user", "content": conteudo_usuario}],
         }
-        r = self.http.post(f"{self.base_url}/chat/completions", json=corpo)
-        r.raise_for_status()
-        return _extrair_json(r.json()["choices"][0]["message"]["content"])
+        # limite de requisições (429) ou serviço sobrecarregado (503): espera e tenta de novo (2 s, depois 5 s)
+        for espera in (2, 5, None):
+            r = self.http.post(f"{self.base_url}/chat/completions", json=corpo)
+            if r.status_code in (429, 503) and espera is not None:
+                log.info("modelo respondeu %s; nova tentativa em %ss", r.status_code, espera)
+                time.sleep(espera)
+                continue
+            r.raise_for_status()
+            return _extrair_json(r.json()["choices"][0]["message"]["content"])
 
     # ------------------------------------------------------------ resumo
     def resumir(self, tipo_nome: str, campos: list[str], texto: str) -> RespostaResumo | None:
@@ -148,10 +163,11 @@ class ClienteOpenAICompat:
         brutos = dados.get("campos") if isinstance(dados.get("campos"), dict) else {}
         campos_ok = {c: (None if brutos.get(c) in (None, "", "null") else str(brutos.get(c))[:300]) for c in campos}
         prioridade = str(dados.get("prioridade") or "").lower().replace("é", "e")
+        validade = dados.get("validade") if isinstance(dados.get("validade"), dict) else None
         return RespostaResumo(resumo=resumo[:2000], campos=campos_ok,
                               prioridade=prioridade if prioridade in PRIORIDADES else None,
                               motivo_prioridade=str(dados.get("motivo_prioridade") or "")[:200],
-                              partes=n_partes)
+                              partes=n_partes, validade=validade)
 
     # ------------------------------------------------------------ classificação
     def classificar(self, texto, imagem_png, contexto_anterior):

@@ -144,8 +144,8 @@ def test_alterar_prioridade_gera_auditoria(processado):
 def test_listar_documentos_com_filtros(processado):
     c, lote = processado
     contratos = c.get("/documentos", params={"tipo": "CONTRATO", "lote_id": lote["id"]}).json()
-    assert len(contratos) == 2 and all(d["tipo"] == "CONTRATO" for d in contratos)
-    baixas = c.get("/documentos", params={"prioridade": "baixa", "lote_id": lote["id"]}).json()
+    assert contratos["total"] == 2 and all(d["tipo"] == "CONTRATO" for d in contratos["itens"])
+    baixas = c.get("/documentos", params={"prioridade": "baixa", "lote_id": lote["id"]}).json()["itens"]
     assert all(d["prioridade"] == "baixa" for d in baixas)
 
 
@@ -250,3 +250,13 @@ def test_imagem_pagina_thumb(processado):
     c, lote = processado
     r = c.get(f"/lotes/{lote['id']}/paginas/0/imagem")
     assert r.status_code == 200 and Image.open(io.BytesIO(r.content)).width > 0
+
+
+def test_modelo_tenta_de_novo_quando_limite_estoura(monkeypatch):
+    import app.llm.openai_compat as mod
+    monkeypatch.setattr(mod.time, "sleep", lambda s: None)
+    respostas = iter([httpx.Response(429, json={}), httpx.Response(503, json={}),
+                      httpx.Response(200, json={"choices": [{"message": {"content": '{"resumo": "ok"}'}}]})])
+    cli = ClienteOpenAICompat("http://falso/v1", "m", "k", multimodal=False, timeout=5)
+    cli.http = httpx.Client(transport=httpx.MockTransport(lambda req: next(respostas)))
+    assert cli.resumir("Contrato", [], "texto do contrato").resumo == "ok"

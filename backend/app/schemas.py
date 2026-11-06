@@ -1,5 +1,5 @@
 """Contratos da API (o que o front recebe/envia)."""
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -52,13 +52,35 @@ class PaginaOut(BaseModel):
     erro: str | None
 
 
+class ValidadeOut(BaseModel):
+    data: date | None = None
+    inicio: date | None = None
+    status: Literal["vigente", "vencendo", "vencido", "indeterminado", "sem_validade"] = "sem_validade"
+    dias_restantes: int | None = None        # negativo = vencido há N dias
+    origem: Literal["texto", "modelo", "regra"] | None = None
+    evidencia: str | None = None             # trecho do documento que comprova a data
+
+
+class TrabalhadorRef(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    rotulo: str
+    cpf_mascarado: str
+
+
 class DocumentoOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: str
+    codigo: str = ""                         # identificador curto para a tela (DOC-2026-AB12CD)
     lote_id: str
     ordem: int
     tipo: str
     tipo_nome: str = ""
+    setor: str = ""
+    titulo: str | None = None
+    validade: ValidadeOut = Field(default_factory=ValidadeOut)
+    trabalhador: TrabalhadorRef | None = None    # dono do documento (pela impressão digital do CPF)
+    criado_em: datetime | None = None
     pagina_inicio: int
     pagina_fim: int
     n_paginas: int = 0
@@ -72,6 +94,14 @@ class DocumentoOut(BaseModel):
     campos: dict | None = None
 
     _p = field_validator("prioridade", mode="before")(_prioridade_texto)
+
+
+class PaginaDocumentos(BaseModel):
+    total: int
+    pagina: int
+    por_pagina: int
+    paginas: int
+    itens: list[DocumentoOut]
 
 
 class RevisaoIn(BaseModel):

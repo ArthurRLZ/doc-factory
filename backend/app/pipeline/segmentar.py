@@ -8,8 +8,9 @@ Para cada página, combina sinais em ordem de força:
   2. "Página 1 de 3"            → início certo
   3. título no topo (+ modelo)     → início provável
   4. modelo diz que é início       → início possível
-  5. tipo mudou (ambos confiáveis) → início fraco
-  6. página em branco           → separador (fecha o documento)
+  5. CPF de outra pessoa          → início provável (chave identificadora)
+  6. tipo mudou (ambos confiáveis) → início fraco
+  7. página em branco           → separador (fecha o documento)
 Cada decisão gera uma confiança de corte; a confiança do documento é a menor
 entre (tipo, cortes, qualidade do OCR).
 """
@@ -63,6 +64,11 @@ def _decidir(p: PaginaInfo, atual: DocProposto | None, forcar_novo: bool) -> tup
         return True, 0.9, None
     if titulo and p.inicio_llm is False:
         return True, 0.6, f"pág. {p.numero + 1}: título no topo, mas modelo diz continuação"
+    # chave identificadora: a página traz o CPF de OUTRA pessoa (impressões sem nenhuma em comum)
+    cpfs_pag = {c["h"] for c in s.get("cpfs", [])}
+    cpfs_doc = {c["h"] for i in atual._infos for c in (i.sinais or {}).get("cpfs", [])}
+    if cpfs_pag and cpfs_doc and not (cpfs_pag & cpfs_doc):
+        return True, 0.8, None
     if p.inicio_llm:
         return True, 0.75, None
     tipo_atual = _tipo_votado(atual._infos)[0]
@@ -91,7 +97,7 @@ def _tipo_votado(infos: list[PaginaInfo]) -> tuple[str, float]:
     return vencedor, media * participacao
 
 
-def _fechar(doc: DocProposto) -> DocProposto:
+def _fechar(doc: DocProposto, limiar: float) -> DocProposto:
     doc.tipo, conf_tipo = _tipo_votado(doc._infos)
     conf = min([conf_tipo] + doc._cortes)
 
@@ -114,13 +120,14 @@ def _fechar(doc: DocProposto) -> DocProposto:
         doc.motivos.append("tipo não identificado")
 
     doc.confianca = round(conf, 3)
-    if doc.confianca < settings.LIMIAR_REVISAO and not doc.motivos:
-        doc.motivos.append(f"confiança {doc.confianca:.2f} abaixo do limiar de revisão ({settings.LIMIAR_REVISAO:.2f})")
-    doc.revisao = doc.confianca < settings.LIMIAR_REVISAO or doc.tipo == DESCONHECIDO or bool(doc.motivos)
+    if doc.confianca < limiar and not doc.motivos:
+        doc.motivos.append(f"confiança {doc.confianca:.2f} abaixo do limiar de revisão ({limiar:.2f})")
+    doc.revisao = doc.confianca < limiar or doc.tipo == DESCONHECIDO or bool(doc.motivos)
     return doc
 
 
-def segmentar(paginas: list[PaginaInfo]) -> list[DocProposto]:
+def segmentar(paginas: list[PaginaInfo], limiar: float | None = None) -> list[DocProposto]:
+    limiar = settings.LIMIAR_REVISAO if limiar is None else limiar
     docs: list[DocProposto] = []
     atual: DocProposto | None = None
     forcar_novo = False
@@ -128,7 +135,7 @@ def segmentar(paginas: list[PaginaInfo]) -> list[DocProposto]:
     for p in sorted(paginas, key=lambda i: i.numero):
         if p.em_branco and settings.BRANCO_COMO_SEPARADOR:
             if atual:
-                docs.append(_fechar(atual))
+                docs.append(_fechar(atual, limiar))
                 atual = None
             forcar_novo = True
             continue  # página separadora não entra em nenhum documento
@@ -137,7 +144,7 @@ def segmentar(paginas: list[PaginaInfo]) -> list[DocProposto]:
         forcar_novo = False
         if novo:
             if atual:
-                docs.append(_fechar(atual))
+                docs.append(_fechar(atual, limiar))
             atual = DocProposto()
         atual.paginas.append(p.numero)
         atual._infos.append(p)
@@ -146,5 +153,5 @@ def segmentar(paginas: list[PaginaInfo]) -> list[DocProposto]:
             atual.motivos.append(alerta)
 
     if atual:
-        docs.append(_fechar(atual))
+        docs.append(_fechar(atual, limiar))
     return docs

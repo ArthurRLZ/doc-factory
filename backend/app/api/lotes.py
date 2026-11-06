@@ -1,7 +1,10 @@
 """Upload e acompanhamento de lotes."""
 import hashlib
+import io
+import json
 import os
 import tempfile
+import zipfile
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response
@@ -123,6 +126,32 @@ def reprocessar(lote_id: str, tudo: bool = False, db: Session = Depends(get_db),
     lote.status, lote.erro = "processando", None
     db.commit()
     return lote_out(db, lote)
+
+
+@router.get("/{lote_id}/zip")
+def baixar_zip(lote_id: str, anonimizado: bool = True, db: Session = Depends(get_db),
+               u: UsuarioAtual = Depends(analista)):
+    """Todos os documentos do lote num .zip, um PDF por documento, nomeados por ordem e tipo,
+    mais um manifesto.json (tipo, páginas, validade, prioridade, resumo)."""
+    if not anonimizado and u.autenticado and u.perfil == "analista":
+        raise HTTPException(403, "O PDF original (com dados pessoais) exige perfil revisor ou superior")
+    lote = _obter(db, lote_id)
+    if lote.status != "concluido":
+        raise HTTPException(409, f"Lote ainda não concluído (status: {lote.status})")
+    st, buf, manifesto = get_storage(), io.BytesIO(), []
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        for d in lote.documentos:
+            key = d.pdf_anon_key if anonimizado else d.pdf_key
+            if not key:
+                continue
+            nome = f"{d.ordem + 1:03d}_{d.tipo.lower()}{'_anon' if anonimizado else ''}.pdf"
+            z.writestr(nome, st.get_bytes(key))
+            manifesto.append(doc_out(d).model_dump(mode="json") | {"arquivo": nome})
+        z.writestr("manifesto.json", json.dumps({"lote": lote.nome, "lote_id": lote.id, "documentos": manifesto},
+                                                ensure_ascii=False, indent=2))
+    nome_zip = f"{os.path.splitext(lote.nome)[0]}_documentos.zip"
+    return Response(buf.getvalue(), media_type="application/zip",
+                    headers={"Content-Disposition": f'attachment; filename="{nome_zip}"'})
 
 
 @router.get("/{lote_id}/paginas/{numero}/imagem")

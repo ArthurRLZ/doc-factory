@@ -4,14 +4,16 @@ processar_pagina()       → etapas 1-3, por página, idempotente (pode rodar 2x
 finalizar_lote_se_pronto() → quando TODAS as páginas acabaram, roda etapas 4-5 uma única vez
 """
 import logging
+from collections import Counter
 
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.llm import obter_llm
-from app.models import Documento, Lote, Pagina, agora
-from app.pipeline import rasterizar
+from app.models import Documento, Lote, Pagina, Trabalhador, agora
+from app.pipeline import identidade, rasterizar
+from app.pipeline.automacao import obter_limiar
 from app.pipeline.anonimizar import indices_sensiveis, mascarar_texto, tarjar_imagem
 from app.pipeline.classificar import (classificar_por_regras, combinar,
                                       sinais_de_inicio, texto_do_topo)
@@ -20,7 +22,7 @@ from app.pipeline.ocr import e_pagina_em_branco, ocr_png
 from app.pipeline.resumir import resumir_documento
 from app.pipeline.segmentar import PaginaInfo, segmentar
 from app.storage import get_storage, key_documento, key_pagina
-from app.tipos import DESCONHECIDO
+from app.tipos import DESCONHECIDO, TIPOS_DO_TRABALHADOR
 
 log = logging.getLogger(__name__)
 STATUS_EM_ABERTO = ("pendente", "processando", "erro")
@@ -73,6 +75,8 @@ def processar_pagina(db: Session, pagina_id: int) -> None:
                 p.sinais = p.sinais | {"llm_justificativa": resp.justificativa}
 
         p.tipo, p.confianca, p.divergente = combinar(regra, p.tipo_llm, p.conf_llm)
+        # chave identificadora: impressão digital dos CPFs da página (lidos ANTES da máscara; o CPF não é guardado)
+        p.sinais = p.sinais | {"cpfs": identidade.impressoes(db, texto or "")}
 
     p.status, p.erro = "ok", None
     db.commit()
@@ -133,7 +137,7 @@ def segmentar_e_montar(db: Session, lote: Lote) -> None:
              for p in lote.paginas]
     por_numero = {p.numero: p for p in lote.paginas}
 
-    for ordem, dp in enumerate(segmentar(infos)):
+    for ordem, dp in enumerate(segmentar(infos, obter_limiar(db))):
         doc = Documento(lote_id=lote.id, ordem=ordem, tipo=dp.tipo,
                         pagina_inicio=min(dp.paginas), pagina_fim=max(dp.paginas),
                         confianca=dp.confianca, motivos=dp.motivos,
@@ -144,8 +148,33 @@ def segmentar_e_montar(db: Session, lote: Lote) -> None:
         for p in pags:
             p.documento_id = doc.id
         gerar_arquivos(lote, doc, pags)
+        atribuir_trabalhador(db, doc, pags)
         resumir_documento(lote, doc)
     db.commit()
+
+
+def atribuir_trabalhador(db: Session, doc: Documento, paginas: list[Pagina]) -> None:
+    """Liga o documento à pessoa cujo CPF mais aparece nas suas páginas (pela impressão digital).
+    Só tipos do trabalhador (TIPOS_DO_TRABALHADOR); documentos sem CPF ou da empresa ficam sem trabalhador."""
+    if doc.tipo not in TIPOS_DO_TRABALHADOR:
+        doc.trabalhador_id = None
+        return
+    contagem: Counter = Counter()
+    mascaras = {}
+    for p in paginas:
+        for c in (p.sinais or {}).get("cpfs", []):
+            contagem[c["h"]] += 1
+            mascaras[c["h"]] = c["m"]
+    if not contagem:
+        doc.trabalhador_id = None
+        return
+    h = contagem.most_common(1)[0][0]
+    t = db.scalar(select(Trabalhador).where(Trabalhador.cpf_hash == h))
+    if not t:
+        t = Trabalhador(cpf_hash=h, cpf_mascarado=mascaras[h])
+        db.add(t)
+        db.flush()
+    doc.trabalhador_id = t.id
 
 
 def gerar_arquivos(lote: Lote, doc: Documento, paginas: list[Pagina]) -> None:

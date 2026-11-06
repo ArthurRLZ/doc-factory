@@ -38,6 +38,7 @@ class Settings(BaseSettings):
     ANONIMIZAR_NOMES: bool = True       # nomes de pessoas → [NOME] (rótulos do documento + reconhecedor spaCy)
     ANONIMIZAR_ENDERECOS: bool = True   # logradouro + número → [ENDERECO], CEP → [CEP] (cidades ficam)
     NER_MODELO: str = "pt_core_news_md" # modelo spaCy em português; ausente = só as regras por rótulo
+    CPF_SEGREDO: str | None = None      # segredo da impressão digital do CPF (dossiê); defina em produção
 
     # --- Classificação / revisão ----------------------------------------
     LIMIAR_REVISAO: float = 0.80       # abaixo disso → fila de revisão humana
@@ -52,6 +53,10 @@ class Settings(BaseSettings):
     LLM_BASE_URL: str | None = None     # sobrescreve a URL padrão do provedor
     LLM_MULTIMODAL: bool = True         # envia a imagem (mascarada) junto do texto
     LLM_TIMEOUT: int = 60
+
+    # --- Validade -----------------------------------------------------------
+    VALIDADE_ALERTA_DIAS: int = 30      # vence em até N dias → status "vencendo" (e prioridade alta)
+    FUSO_HORAS: int = -3                # fuso para "hoje" / "esta semana" nos painéis (Brasília = -3)
 
     # --- Resumo -------------------------------------------------------------
     RESUMO_ATIVO: bool = True           # gera resumo de cada documento (modelo, ou simples sem modelo)
