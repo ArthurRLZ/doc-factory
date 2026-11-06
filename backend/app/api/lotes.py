@@ -7,7 +7,7 @@ import os
 import tempfile
 import zipfile
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import Response
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
@@ -18,7 +18,7 @@ from app.api.documentos import doc_out
 from app.config import settings
 from app.db import get_db
 from app.models import Lote, Pagina, Revisao, Trabalhador, VersaoLote, novo_id
-from app.pipeline import fraude, rasterizar
+from app.pipeline import fraude, privacidade, rasterizar
 from app.pipeline.rasterizar import contar_paginas
 from app.schemas import DocumentoOut, LoteOut, PaginaOut
 from app.status import StatusLote, StatusPagina
@@ -232,6 +232,18 @@ def apagar_lote(lote_id: str, db: Session = Depends(get_db), u: UsuarioAtual = D
     db.commit()
     get_storage().delete_prefixo(f"lotes/{lote_id}/")
     return {"apagado": lote_id} | resumo
+
+
+@router.get("/{lote_id}/privacidade")
+def risco_de_privacidade(lote_id: str, limite: int = Query(100, ge=1, le=1000, description="máx. de documentos sensíveis detalhados"),
+                         db: Session = Depends(get_db), _u: UsuarioAtual = Depends(analista)):
+    """Relatório de risco de privacidade (para o encarregado de dados): quantos CPFs, nomes, endereços..., quantas
+    pessoas distintas e quais documentos têm dados sensíveis (saúde, biometria, filiação sindical). Só números e
+    evidências: nenhum dado pessoal é devolvido. Use antes de compartilhar o lote."""
+    lote = _obter(db, lote_id)
+    if lote.status != StatusLote.CONCLUIDO:
+        raise HTTPException(409, f"Lote ainda não concluído (status: {lote.status})")
+    return privacidade.relatorio_do_lote(db, lote, limite)
 
 
 @router.get("/{lote_id}/zip")
