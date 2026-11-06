@@ -1,0 +1,56 @@
+# Stack Completa com imagens do GitHub Container Registry (ghcr.io)
+# Execute da raiz: docker compose up --build
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment: { POSTGRES_USER: docfactory, POSTGRES_PASSWORD: docfactory, POSTGRES_DB: docfactory }
+    volumes: [pgdata:/var/lib/postgresql/data]
+    ports: ["5432:5432"]
+    healthcheck: { test: ["CMD", "pg_isready", "-U", "docfactory"], interval: 3s, retries: 20 }
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    env_file: [{ path: ./backend/.env, required: false }]
+    environment: &env
+      DATABASE_URL: postgresql+psycopg://docfactory:docfactory@postgres:5432/docfactory
+      STORAGE_BACKEND: local
+      DATA_DIR: /data             # volume compartilhado: a API grava o PDF, o worker lê
+      WORKER_INLINE: "false"
+    volumes: [dados:/data]
+    ports: ["8000:8000"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    depends_on: { postgres: { condition: service_healthy } }
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: ["python", "-m", "app.worker"]
+    env_file: [{ path: ./backend/.env, required: false }]
+    environment: *env
+    volumes: [dados:/data]
+    depends_on:
+      postgres: { condition: service_healthy }
+      api: { condition: service_healthy }
+    stop_grace_period: 60s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "5173:80"   # Interface React acessível em http://localhost:5173
+    depends_on:
+      - api
+
+volumes:
+  pgdata:
+  dados:

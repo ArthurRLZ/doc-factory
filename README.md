@@ -57,11 +57,11 @@
 ### 1. Via Docker Compose (Stack Completa)
 
 ```bash
-cd backend
+# Execute na raiz do repositório
 docker compose up --build --scale worker=3
 ```
+- **Frontend:** `http://localhost:5173`
 - **API & Swagger:** `http://localhost:8000/docs`
-- **Console MinIO:** `http://localhost:9001` (user: `minioadmin` / senha: `minioadmin`)
 
 ### 2. Localmente (Desenvolvimento Rápido)
 

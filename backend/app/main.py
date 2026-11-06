@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import func, select
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from app.api import auth, documentos, lotes, painel
+from app.api import auth, automacao, documentos, lotes, painel, trabalhadores
 from app.api.deps import UsuarioAtual, analista, exigir_api_key
 from app.config import settings
 from app.db import SessionLocal, init_db
@@ -45,8 +45,11 @@ app.add_middleware(CORSMiddleware, allow_origins=[o.strip() for o in settings.CO
 protegido = [Depends(exigir_api_key)]
 app.include_router(auth.router, dependencies=protegido)
 app.include_router(painel.router, dependencies=protegido)
+app.include_router(automacao.router, dependencies=protegido)
+app.include_router(automacao.router_aprendizados, dependencies=protegido)
 app.include_router(lotes.router, dependencies=protegido)
 app.include_router(documentos.router, dependencies=protegido)
+app.include_router(trabalhadores.router, dependencies=protegido)
 
 
 # ------------------------------------------------------------ erros num formato único para o front

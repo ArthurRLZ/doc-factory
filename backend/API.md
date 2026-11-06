@@ -110,3 +110,49 @@ const { data: lote } = await api.post('/lotes', form, {
 
 Outros: `GET /lotes` (lista) · `GET /lotes/{id}/documentos` · `GET /lotes/{id}/zip` (todos os PDFs + manifesto) ·
 `GET /vencimentos?ate_dias=30` · `GET /busca?q=` · `GET /health`.
+
+## Meta de automação (para o pitch e para uma tela de configuração)
+
+- `GET /automacao` → `{limiar_atual, curva: [{limiar, automaticos, para_revisao, percentual_automatico,
+  acuracia_estimada (null sem amostra), amostra, atual}], acuracia_medida: {documentos_revisados, corretos, percentual}}`.
+  Gráfico sugerido: eixo X = limiar, barras = `percentual_automatico`, linha = `acuracia_estimada`.
+- `GET /automacao/sugerir?meta=95` → menor limiar que atinge a acurácia-meta pelas revisões já feitas.
+- `PUT /automacao/limiar` (admin) `{"limiar": 0.85, "aplicar": true}` → muda na hora e reavalia a fila.
+
+A acurácia é **medida** pelas revisões humanas (aprovado sem mudança = acerto; tipo trocado, dividido ou
+juntado = erro). Sem revisões suficientes ela vem `null` — o sistema não inventa número.
+
+## Dossiê do trabalhador e checklist (tela sugerida: "Trabalhadores")
+
+O trabalhador é identificado pela **impressão digital do CPF** — o CPF não é guardado; para exibir use
+`cpf_mascarado` (`***.982.247-**`). Cada documento traz `trabalhador: {id, rotulo, cpf_mascarado}` ou `null`
+(documentos da empresa, como certidões, não têm trabalhador).
+
+- `GET /trabalhadores?lote_id=&situacao=` → `{total, irregulares, exigidos, itens: [{id, rotulo, cpf_mascarado,
+  documentos, situacao (regular | atencao | irregular), pendencias, faltando: [tipos], vencidos, vencendo}]}`
+  (irregulares primeiro).
+- `GET /trabalhadores/{id}/dossie` → o resumo acima + `checklist: [{tipo, tipo_nome, status (ok | faltando |
+  vencido | vencendo | indeterminado), documento_id, validade, observacao}]` + `outros_alertas` (ex.: certificado
+  de NR vencendo) + `duplicados` + `itens` (documentos da pessoa).
+- `/painel` traz `trabalhadores_irregulares` e um item em `atencao` com `tipo: "trabalhadores_irregulares"`.
+
+Documentos exigidos: `DOCUMENTOS_EXIGIDOS_TRABALHADOR` em `backend/app/tipos.py` (identidade, CTPS, ASO, ficha de EPI).
+
+## Sinais de fraude (veredito com evidência)
+
+Cada documento traz `risco: "confiavel" | "atencao" | "alto_risco"` e `alertas: [{codigo, gravidade (media/alta),
+mensagem, evidencia}]`. Sugestão de selo: Confiável (verde) · Atenção (amarelo) · Alto risco (vermelho), mostrando
+`mensagem` + `evidencia` ao passar o mouse. Códigos: `pdf_editado`, `pdf_modificado`, `repetido`,
+`paginas_misturadas`, `data_futura`, `validade_invertida`. Alto risco já vai para a fila de revisão.
+
+- Filtro: `GET /documentos?risco=alto_risco`. O lote também traz `alertas` (metadados do arquivo enviado).
+- `/painel`: `documentos_suspeitos` e item em `atencao` com `tipo: "fraude"`.
+
+## Aprender com as correções
+
+Toda vez que o revisor usa `alterar_tipo`, o sistema aprende: o título do documento vira regra (vale mesmo sem
+modelo) e o trecho anonimizado vira exemplo para o modelo.
+
+- `GET /aprendizados` → `[{id, titulo, tipo_errado, tipo_certo, usuario, usos, ativo, criado_em}]`
+  (`usos` = quantas páginas já foram decididas por esse aprendizado).
+- `POST /aprendizados/{id}/desativar` (admin) → desfaz uma correção feita por engano.

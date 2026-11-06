@@ -38,6 +38,7 @@ class Settings(BaseSettings):
     ANONIMIZAR_NOMES: bool = True       # nomes de pessoas → [NOME] (rótulos do documento + reconhecedor spaCy)
     ANONIMIZAR_ENDERECOS: bool = True   # logradouro + número → [ENDERECO], CEP → [CEP] (cidades ficam)
     NER_MODELO: str = "pt_core_news_md" # modelo spaCy em português; ausente = só as regras por rótulo
+    CPF_SEGREDO: str | None = None      # segredo da impressão digital do CPF (dossiê); defina em produção
 
     # --- Classificação / revisão ----------------------------------------
     LIMIAR_REVISAO: float = 0.80       # abaixo disso → fila de revisão humana

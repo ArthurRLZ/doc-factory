@@ -2,6 +2,29 @@
 
 Hack Garanhuns Tech 2026 · Desafio 3. Recebe lotes digitalizados grandes (PDF/TIFF), separa cada
 documento, classifica o tipo, gera PDF pesquisável e anonimizado e manda as dúvidas para revisão humana.
+Feito para **gestão de documentos de terceiros**: diz até quando cada documento vale (com a prova),
+monta o dossiê de cada trabalhador sem guardar o CPF e aponta o que falta, o que venceu e o que vai vencer.
+
+**Guia para o front:** [`API.md`](API.md) — cada tela e componente → rota e campos.
+
+## O que o sistema faz
+
+| Capacidade | Como |
+|---|---|
+| Separar e agrupar | sinais de início/fim por página ("Página 1 de N", título no topo, CPF de outra pessoa, página em branco) |
+| Classificar | 14 tipos (`tipos.py`): ASO, ficha de EPI, certificado de NR, CTPS, contracheque, guia do FGTS, CND federal, CRF do FGTS, CNDT, contrato, nota fiscal, identidade, comprovante, certidão — regras + modelo opcional com descrição de cada tipo |
+| OCR pesquisável | Tesseract em português; PDF com texto invisível; busca no texto |
+| Anonimizar | CPF, CNPJ, RG, e-mail, telefone, nomes, endereço e CEP — no banco, na busca, no resumo, na imagem enviada ao modelo e no PDF (tarja real) |
+| Validade com prova | data escrita no texto → modelo (só se o trecho citado existir no texto) → regra do tipo (ASO 12 meses, CRF 30 dias, NR por norma). Status vigente / vencendo / vencido, com a evidência |
+| Dossiê do trabalhador | CPF vira impressão digital (HMAC) antes da máscara; o CPF nunca é guardado. Checklist de exigidos: faltando, vencido, vencendo, duplicado |
+| Resumo e campos-chave | modelo com o texto já anonimizado (documento grande: em partes); sem modelo, resumo simples |
+| Prioridade | tipo + modelo + lote urgente + vencimento; fila de revisão por prioridade e confiança |
+| Meta de automação | limiar ajustável ao vivo, curva automação × revisão, acurácia medida pelas revisões humanas |
+| Revisão humana e auditoria | aprovar, trocar tipo, mudar prioridade, dividir, juntar; trilha com antes/depois |
+| Aprender com correções | cada troca de tipo vira regra (título → tipo, vale sem modelo) e exemplo para o modelo; dá para desativar |
+| Sinais de fraude | PDF editado/modificado, documento repetido em outro lote, páginas misturadas, datas impossíveis → confiável / atenção / alto risco, com evidência |
+| Telas | `/painel`, `/documentos` (filtros e paginação), `/relatorios`, `/trabalhadores`, `/vencimentos`, `.zip` do lote |
+| Login e perfis | JWT, analista < revisor < admin (desligado por padrão para a demo) |
 
 **Stack:** FastAPI · PyMuPDF · Tesseract (`por`) · SQLAlchemy (SQLite no dev, PostgreSQL em produção) ·
 storage local ou MinIO/S3 · modelo plugável (qualquer API compatível com OpenAI).
@@ -14,14 +37,17 @@ pip install -r requirements.txt
 cp .env.example .env                                    # WORKER_INLINE=true → API + worker num processo só
 uvicorn app.main:app --reload                           # http://localhost:8000/docs
 python scripts/gerar_lote_teste.py lote_teste.pdf       # lote falso de 11 páginas / 6 documentos
+python scripts/gerar_lote_bernhoeft.py terceiros.pdf    # gestão de terceiros: 14 páginas / 12 documentos
+                                                        # (datas relativas a hoje: vencidos, vencendo, vigentes)
 curl -F arquivo=@lote_teste.pdf http://localhost:8000/lotes
-pytest -q                                               # 31 testes, inclui ponta a ponta
+pytest -q                                               # 66 testes, inclui ponta a ponta
 ```
 
 ## Rodar a stack completa
 
 ```bash
-docker compose up --build --scale worker=3              # Postgres + MinIO (console :9001) + API + 3 workers
+# da RAIZ do repositório (docker-compose.yml do projeto):
+docker compose up --build --scale worker=3              # Postgres + API + 3 workers + front em :5173
 ```
 
 ## Estrutura
@@ -34,11 +60,14 @@ app/
   db.py · models.py    Lote, Pagina, Documento, Revisao, Usuario (+ índice GIN full-text pt no Postgres)
                        + migração leve: adiciona colunas novas em bancos antigos
   storage.py           LocalStorage | S3Storage (MinIO) — banco guarda só a chave
-  tipos.py             ← TAXONOMIA: troquem pelos 5 tipos reais do desafio
+  tipos.py             ← TAXONOMIA: 14 tipos, descrições, setores, regras de validade e exigidos
   worker.py            fila por página, retomada após falha, SKIP LOCKED
   api/lotes.py         upload em streaming, progresso, páginas, miniaturas, reprocessar
   api/documentos.py    documentos, PDF, resumo, fila de revisão, dividir/juntar, auditoria, busca
   api/auth.py          login e usuários (perfis analista/revisor/admin)
+  api/painel.py        telas: /painel e /relatorios
+  api/trabalhadores.py dossiê do trabalhador e checklist
+  api/automacao.py     meta de automação (curva, limiar ao vivo)
   llm/                 interface + cliente OpenAI-compatível (OpenAI, Gemini, DeepSeek, Ollama…)
   pipeline/
     rasterizar.py      1. PyMuPDF → PNG 300 dpi por página (ou texto nativo se o PDF for digital)
@@ -48,9 +77,15 @@ app/
     segmentar.py       4. sinais de início/fim → documentos (função pura, testável)
     montar.py          5. PyMuPDF → PDF pesquisável (texto invisível) + PDF com redaction real
     resumir.py         6. resumo (modelo, em partes se for grande; ou simples) + prioridade
+    validade.py           validade com evidência: texto → modelo → regra do tipo
+    identidade.py         impressão digital do CPF (HMAC) — o CPF não é guardado
+    checklist.py          exigidos por trabalhador: faltando, vencido, vencendo, duplicado
+    automacao.py          limiar em tempo real, curva e acurácia pelas revisões
+    aprendizado.py        correções humanas → regra por título + exemplos para o modelo
+    fraude.py             sinais de adulteração com veredito e evidência
     orquestrador.py       liga tudo, grava banco/storage
-scripts/gerar_lote_teste.py
-tests/test_pipeline.py
+scripts/gerar_lote_teste.py · gerar_lote_bernhoeft.py
+tests/                 66 testes (pipeline, terceiros, validade, dossiê, telas, automação, anonimização, login)
 ```
 
 ## Endpoints

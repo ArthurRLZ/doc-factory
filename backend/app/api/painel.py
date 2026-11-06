@@ -14,8 +14,8 @@ from app.api.deps import UsuarioAtual, analista
 from app.api.documentos import doc_out
 from app.config import settings
 from app.db import get_db
-from app.models import Documento, Lote
-from app.pipeline import validade
+from app.models import Documento, Lote, Trabalhador
+from app.pipeline import checklist, validade
 from app.tipos import PRIORIDADE_NOME, setor_do_tipo
 
 router = APIRouter(tags=["telas (painel e relatórios)"])
@@ -99,6 +99,20 @@ def painel(db: Session = Depends(get_db), _u: UsuarioAtual = Depends(analista)):
         atencao.append({"tipo": "revisao", "gravidade": "media", "total": len(pendentes),
                         "titulo": "Revisões pendentes", "subtitulo": f"{altas} documento(s) de alta prioridade",
                         "acao": "Revisar", "rota": "/revisao/fila"})
+    suspeitos = [d for d in docs if d.risco in ("atencao", "alto_risco")]
+    if suspeitos:
+        altos = sum(1 for d in suspeitos if d.risco == "alto_risco")
+        atencao.append({"tipo": "fraude", "gravidade": "alta" if altos else "media", "total": len(suspeitos),
+                        "titulo": f"{len(suspeitos)} documento(s) com sinal de adulteração",
+                        "subtitulo": f"{altos} de alto risco" if altos else "verifique as evidências",
+                        "acao": "Ver", "rota": "/documentos?risco=alto_risco" if altos else "/documentos?risco=atencao"})
+    irregulares = [t for t in db.scalars(select(Trabalhador))
+                   if t.documentos and checklist.avaliar(t)["situacao"] == "irregular"]
+    if irregulares:
+        atencao.append({"tipo": "trabalhadores_irregulares", "gravidade": "alta", "total": len(irregulares),
+                        "titulo": f"{len(irregulares)} trabalhador(es) com documentação irregular",
+                        "subtitulo": "documento exigido faltando ou vencido", "acao": "Ver",
+                        "rota": "/trabalhadores?situacao=irregular"})
     atencao.append({"tipo": "processados_hoje", "gravidade": "ok", "total": len(processados_hoje),
                     "titulo": f"{len(processados_hoje)} processado(s) hoje",
                     "subtitulo": "Todos os documentos classificados" if not pendentes
@@ -121,6 +135,8 @@ def painel(db: Session = Depends(get_db), _u: UsuarioAtual = Depends(analista)):
         "recentes": [doc_out(d).model_dump(mode="json") for d in recentes],
         "por_setor": [{"setor": s, "total": n, "percentual": _pct(n, len(docs))} for s, n in por_setor.most_common()],
         "fila_revisao": len(pendentes),
+        "trabalhadores_irregulares": len(irregulares),
+        "documentos_suspeitos": len(suspeitos),
         "processados_hoje": len(processados_hoje),
     }
 

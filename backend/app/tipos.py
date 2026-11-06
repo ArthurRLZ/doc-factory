@@ -181,6 +181,11 @@ TIPOS: dict[str, dict] = {
 # documentos que todo trabalhador terceirizado precisa ter (checklist do dossiê) — configurável
 DOCUMENTOS_EXIGIDOS_TRABALHADOR = ["IDENTIDADE", "CTPS", "ASO", "FICHA_EPI"]
 
+# tipos que pertencem à PESSOA do trabalhador (entram no dossiê). Em contrato ou nota fiscal o CPF é de
+# uma parte ou de um cliente, não de um trabalhador terceirizado — esses não criam dossiê.
+TIPOS_DO_TRABALHADOR = {"IDENTIDADE", "CTPS", "ASO", "FICHA_EPI", "CERTIFICADO_NR", "CONTRACHEQUE",
+                        "COMPROVANTE_RESIDENCIA", "CERTIDAO"}
+
 # setor responsável (a tela agrupa por setor)
 SETORES: dict[str, str] = {
     "IDENTIDADE": "Recursos Humanos", "COMPROVANTE_RESIDENCIA": "Recursos Humanos", "CERTIDAO": "Recursos Humanos",

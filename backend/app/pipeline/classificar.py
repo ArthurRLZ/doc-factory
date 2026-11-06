@@ -22,15 +22,26 @@ class Classificacao:
     tipo: str
     confianca: float
     scores: dict = field(default_factory=dict)
+    aprendizado_id: int | None = None      # correção humana que decidiu (se houve)
 
 
-def classificar_por_regras(texto: str, texto_topo: str) -> Classificacao:
+PESO_APRENDIZADO = 6   # uma correção humana vale mais que um título padrão (+3)
+
+
+def classificar_por_regras(texto: str, texto_topo: str,
+                           aprendidos: list[tuple[int, str, str]] | None = None) -> Classificacao:
+    """aprendidos: [(id, título normalizado, tipo correto)] vindos das correções dos revisores."""
     t, topo = normalizar(texto), normalizar(texto_topo)
     scores = {}
     for cod, cfg in TIPOS.items():
         s = sum(1 for p in cfg["palavras"] if p in t)
         s += sum(3 for rx in _TITULOS[cod] if rx.search(topo))
         scores[cod] = s
+    aprendido = None
+    for ap_id, titulo, tipo in aprendidos or []:
+        if titulo and tipo in scores and titulo in topo:
+            scores[tipo] += PESO_APRENDIZADO
+            aprendido = aprendido or ap_id
     melhor = max(scores, key=scores.get)
     topo_s, total = scores[melhor], sum(scores.values())
     if topo_s == 0:
@@ -38,7 +49,8 @@ def classificar_por_regras(texto: str, texto_topo: str) -> Classificacao:
     # confiança = quão dominante é o vencedor × quanta evidência absoluta existe
     dominancia = topo_s / total
     evidencia = min(1.0, topo_s / 6)
-    return Classificacao(melhor, round(dominancia * (0.5 + 0.5 * evidencia), 3), scores)
+    return Classificacao(melhor, round(dominancia * (0.5 + 0.5 * evidencia), 3), scores,
+                         aprendido if aprendido is not None else None)
 
 
 def texto_do_topo(palavras: list[dict], altura_pt: float, fracao: float = 0.3) -> str:
