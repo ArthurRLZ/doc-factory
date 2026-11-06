@@ -2,5 +2,6 @@
 data/
 __pycache__/
 .env
+.env.seguro
 *.pdf
 .idea/

@@ -1,5 +1,7 @@
 """Relatório de risco de privacidade: contagem de identificadores, pessoas distintas e dados sensíveis."""
 import json
+import io
+import zipfile
 
 import pytest
 
@@ -110,8 +112,39 @@ def test_relatorio_do_lote(lote_montado):
 
 def test_relatorio_nao_devolve_dado_pessoal(lote_montado):
     c, lote_id = lote_montado
+    with SessionLocal() as db:
+        db.get(Lote, lote_id).nome = "Maria Silva CPF 529.982.247-25.pdf"
+        doc = db.query(Documento).filter_by(lote_id=lote_id, tipo="ASO").one()
+        doc.titulo = "Prontuário Maria Silva CPF 529.982.247-25"
+        db.commit()
     corpo = json.dumps(c.get(f"/lotes/{lote_id}/privacidade").json(), ensure_ascii=False)
     assert "aaa" not in corpo and "bbb" not in corpo          # impressões digitais de CPF não saem da API
+    assert "Maria Silva" not in corpo and "529.982.247-25" not in corpo
+
+
+def test_zip_anonimizado_nao_expoe_nome_ou_titulo(processado):
+    c, lote = processado
+    with SessionLocal() as db:
+        registro = db.get(Lote, lote['id'])
+        nome_anterior = registro.nome
+        registro.nome = 'Maria Silva 529.982.247-25.pdf'
+        doc = db.query(Documento).filter_by(lote_id=lote['id']).first()
+        titulo_anterior = doc.titulo
+        doc.titulo = 'Maria Silva 529.982.247-25'
+        doc_id = doc.id
+        db.commit()
+    try:
+        r = c.get(f"/lotes/{lote['id']}/zip")
+        assert r.status_code == 200
+        assert 'Maria' not in r.headers['content-disposition']
+        with zipfile.ZipFile(io.BytesIO(r.content)) as z:
+            manifesto = z.read('manifesto.json').decode('utf-8')
+        assert 'Maria Silva' not in manifesto and '529.982.247-25' not in manifesto
+    finally:
+        with SessionLocal() as db:
+            db.get(Lote, lote['id']).nome = nome_anterior
+            db.get(Documento, doc_id).titulo = titulo_anterior
+            db.commit()
 
 
 def test_limite_trunca_a_lista_de_documentos(lote_montado):

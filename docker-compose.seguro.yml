@@ -1,0 +1,50 @@
+# Instância local isolada. Não reutiliza automaticamente os volumes da demonstração.
+name: docfactory-seguro
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: docfactory
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Configure o arquivo de credenciais local}
+      POSTGRES_DB: docfactory
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck: { test: ["CMD", "pg_isready", "-U", "docfactory"], interval: 3s, retries: 20 }
+  api:
+    build: ./backend
+    environment: &env
+      DATABASE_URL: postgresql+psycopg://docfactory:${POSTGRES_PASSWORD}@postgres:5432/docfactory
+      STORAGE_BACKEND: local
+      DATA_DIR: /data
+      AMBIENTE: producao
+      AUTH_ATIVO: "true"
+      CADASTRO_ABERTO: "false"
+      CORS_ORIGINS: http://localhost:5173,http://127.0.0.1:5173
+      JWT_SEGREDO: ${JWT_SEGREDO:?Configure o arquivo de credenciais local}
+      CPF_SEGREDO: ${CPF_SEGREDO:?Configure o arquivo de credenciais local}
+      ADMIN_USUARIO: ${ADMIN_USUARIO:?Configure o arquivo de credenciais local}
+      ADMIN_SENHA: ${ADMIN_SENHA:?Configure o arquivo de credenciais local}
+      WORKER_INLINE: "false"
+      LLM_PROVIDER: nenhum
+      PORTAL_ATIVO: "false"
+    volumes: [dados:/data]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    depends_on: { postgres: { condition: service_healthy } }
+  worker:
+    build: ./backend
+    command: ["python", "-m", "app.worker"]
+    environment: *env
+    volumes: [dados:/data]
+    depends_on: { api: { condition: service_healthy } }
+    stop_grace_period: 60s
+  frontend:
+    build: ./frontend
+    ports: ["127.0.0.1:5173:80"]
+    depends_on: [api]
+volumes:
+  pgdata:
+  dados:

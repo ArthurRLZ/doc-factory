@@ -130,16 +130,14 @@ def _recomendacoes(lote_id: str, nivel: str, pessoas: int, pendentes: int, sensi
                  "finalidade (princípio da necessidade, LGPD art. 6º, III).")
     if pendentes:
         r.append(f"{pendentes} documento(s) ainda estão na fila de revisão: o relatório pode mudar depois dela.")
-    if nivel != "baixo":
-        r.append("Abra alguns PDFs anonimizados por amostragem: nome ou endereço que a detecção não reconheceu "
-                 "continua visível.")
+    r.append("Confira os PDFs antes de compartilhar: dados que a detecção ou o OCR não reconheceram podem continuar visíveis.")
     return r
 
 
 # --------------------------------------------------------------- relatório do lote
 def relatorio_do_lote(db: Session, lote: Lote, limite: int = 100) -> dict:
     docs = db.execute(
-        select(Documento.id, Documento.ordem, Documento.tipo, Documento.titulo, Documento.pagina_inicio,
+        select(Documento.id, Documento.ordem, Documento.tipo, Documento.pagina_inicio,
                Documento.pagina_fim, Documento.status_revisao, Documento.texto)
         .where(Documento.lote_id == lote.id).order_by(Documento.ordem)).all()
 
@@ -167,12 +165,12 @@ def relatorio_do_lote(db: Session, lote: Lote, limite: int = 100) -> dict:
             sensiveis_termos[chave].update(e for e in evid if not e.startswith("tipo do documento"))
         if a.sensiveis:
             detalhe.append({"documento_id": d.id, "ordem": d.ordem, "tipo": d.tipo, "tipo_nome": nome_tipo(d.tipo),
-                            "titulo": d.titulo, "pagina_inicio": d.pagina_inicio, "pagina_fim": d.pagina_fim,
+                            "titulo": f"Documento {d.ordem + 1}", "pagina_inicio": d.pagina_inicio, "pagina_fim": d.pagina_fim,
                             "categorias": list(a.sensiveis), "evidencias": a.sensiveis})
 
     nivel, motivos = nivel_de_risco(sum(1 for _ in detalhe), docs_pessoais)
     return {
-        "lote_id": lote.id, "lote": lote.nome, "gerado_em": datetime.now(timezone.utc).isoformat(),
+        "lote_id": lote.id, "lote": f"Lote {lote.id}", "gerado_em": datetime.now(timezone.utc).isoformat(),
         "nivel_risco": nivel, "motivos": motivos,
         "resumo": _frase_resumo(ocorrencias, len(pessoas), sensiveis_docs, len(docs)),
         "totais": {"paginas": lote.total_paginas, "documentos": len(docs),

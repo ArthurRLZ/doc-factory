@@ -368,10 +368,16 @@ def baixar_zip(lote_id: str, anonimizado: bool = True, db: Session = Depends(get
                 continue
             nome = f"{d.ordem + 1:03d}_{d.tipo.lower()}{'_anon' if anonimizado else ''}.pdf"
             z.writestr(nome, st.get_bytes(key))
-            manifesto.append(doc_out(d).model_dump(mode="json") | {"arquivo": nome})
-        z.writestr("manifesto.json", json.dumps({"lote": lote.nome, "lote_id": lote.id, "documentos": manifesto},
+            if anonimizado:
+                manifesto.append({"id": d.id, "ordem": d.ordem, "tipo": d.tipo,
+                                   "pagina_inicio": d.pagina_inicio, "pagina_fim": d.pagina_fim,
+                                   "validade": {"status": doc_out(d).validade.status}, "arquivo": nome})
+            else:
+                manifesto.append(doc_out(d).model_dump(mode="json") | {"arquivo": nome})
+        nome_lote = f"Lote {lote.id}" if anonimizado else lote.nome
+        z.writestr("manifesto.json", json.dumps({"lote": nome_lote, "lote_id": lote.id, "documentos": manifesto},
                                                 ensure_ascii=False, indent=2))
-    nome_zip = f"{os.path.splitext(lote.nome)[0]}_documentos.zip"
+    nome_zip = f"lote_{lote.id}_documentos.zip" if anonimizado else f"{os.path.splitext(lote.nome)[0]}_documentos.zip"
     return Response(buf.getvalue(), media_type="application/zip",
                     headers={"Content-Disposition": util.content_disposition(nome_zip)})
 
