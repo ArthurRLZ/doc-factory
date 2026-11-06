@@ -212,3 +212,22 @@ modelo) e o trecho anonimizado vira exemplo para o modelo.
 `DELETE /lotes/{id}` (admin) apaga o lote, as páginas, os documentos, os arquivos e as pessoas que ficarem sem
 documento. Responde `{apagado, nome, paginas, documentos}` e deixa só um registro de auditoria sem dados pessoais.
 Lote em processamento → 409.
+
+## Endpoints novos (F0–F8) — resumo
+
+- **F0:** `LoteOut.ia` traz `{chamadas_total, chamadas_classificacao, chamadas_resumo, chamadas_outras, paginas_com_ia, paginas_total, percentual_paginas_com_ia, custo_estimado_brl}` e `/painel` ganha o bloco `ia`. `DocumentoOut` traz `decidido_por` (regra, ia, combinado ou humano), `origem_texto` e `ia_justificativa`. Reprocessar zera os contadores.
+- **F2:** `DocumentoOut.pre_revisao` traz `{explicacao, acao_sugerida, tipo_sugerido, confianca, evidencias, origem}`. `POST /documentos/{id}/pre-revisao` (analista) gera a sugestão de novo. `GET /automacao` ganha `pre_revisao {revisoes_com_sugestao, seguidas, percentual}`.
+- **F3:** `GET /funcoes`; `PUT /trabalhadores/{id}/funcao {funcao_chave}` (revisor). Trabalhadores e dossiê ganham `funcao`, `funcao_origem` e `exigidos`, e o checklist ganha itens `CERTIFICADO_NR:NR-xx` com `motivo_exigencia`.
+- **F4:**
+  - `POST /regras-separacao/interpretar` (revisor; não grava; 422 traz `exemplos`).
+  - `POST`/`GET /regras-separacao`.
+  - `/{id}/ativar` e `/{id}/desativar` (revisor); `DELETE /{id}` (admin).
+  - `POST /lotes` aceita o campo `regras`; `reprocessar` aceita `?atualizar_regras=true`.
+  - `LoteOut.regras_aplicadas` e `DocumentoOut.regras_aplicadas`.
+- **F5:** `PUT /lotes/{id}/gabarito` (revisor; 422 se inválido). `GET /lotes/{id}/avaliacao` (409 sem gabarito ou com o lote não concluído). `LoteOut.tem_gabarito`.
+- **F6:** `/alertas/config`, `/alertas/contatos` (GET; POST e DELETE para admin), `/alertas/contatos/{id}/testar`, `/alertas/pendentes`, `POST /alertas/executar?simular=`, `/alertas/historico`.
+- **F7:**
+  - Interno: `POST /portal/convites` (revisor; o token aparece só nessa resposta), `GET /portal/convites`, `/{id}/revogar`, `/{id}/envios`.
+  - Público: `GET /portal/{token}`, `POST /portal/{token}/enviar`, `GET /portal/{token}/envios/{envio_id}`. Token inválido sempre responde 404 `Link inválido ou expirado`. Os limites devolvem 413, 415, 422 ou 429.
+  - `LoteOut` ganha `origem` e `fornecedor`.
+- **F8:** `LoteOut.multidoc` traz `[{pagina_original, recortes}]` quando a imagem enviada tinha várias folhas.

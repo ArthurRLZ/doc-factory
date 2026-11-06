@@ -1,21 +1,16 @@
-function rotulo(data) {
-  return new Date(`${data}T12:00:00`).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' });
-}
+// Volume diário do período (GET /relatorios → volume_diario), em SVG próprio.
+import { data } from '../../utils/formatar';
 
-export default function VolumeChart({ volume = [] }) {
-  const max = Math.max(...volume.map((ponto) => ponto.total), 0);
-  const points = volume.map((ponto, index) => ({
-    ...ponto,
-    x: volume.length > 1 ? (index / (volume.length - 1)) * 700 : 350,
-    y: max ? 145 - (ponto.total / max) * 125 : 145,
-  }));
-  const polyline = points.map(({ x, y }) => `${x},${y}`).join(' ');
-  const area = points.length
-    ? `0,160 ${polyline} 700,160`
-    : '';
-  const labels = volume.filter((_, index) => (
-    index === 0 || index === volume.length - 1 || index % Math.ceil(volume.length / 6) === 0
-  ));
+const L = 700;
+const A = 160;
+
+export default function VolumeChart({ pontos = [] }) {
+  const maior = Math.max(1, ...pontos.map(p => p.total));
+  const passo = pontos.length > 1 ? L / (pontos.length - 1) : 0;
+  const xy = pontos.map((p, i) => [Math.round(i * passo), Math.round(A - (A - 8) * (p.total / maior))]);
+  const linha = xy.map(([x, y]) => `${x},${y}`).join(' ');
+  const rotulos = pontos.filter((_, i) => i % Math.max(1, Math.ceil(pontos.length / 7)) === 0);
+  const escala = [1, 0.75, 0.5, 0.25, 0].map(f => Math.round(maior * f));
 
   return (
     <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm flex flex-col justify-between">
@@ -32,32 +27,23 @@ export default function VolumeChart({ volume = [] }) {
 
       <div className="relative h-52 w-full pt-4">
         <div className="absolute inset-0 flex flex-col justify-between text-[10px] text-slate-300 pointer-events-none">
-          {[1, 0.75, 0.5, 0.25, 0].map((factor) => (
-            <div key={factor} className="border-b border-slate-100 pb-1">{Math.round(max * factor)}</div>
-          ))}
+          {escala.map((v, i) => <div key={i} className="border-b border-slate-100 pb-1">{v}</div>)}
         </div>
-
-        <svg className="w-full h-full overflow-visible" viewBox="0 0 700 160" role="img" aria-label="Volume diário de documentos">
+        <svg className="w-full h-full overflow-visible" viewBox={`0 0 ${L} ${A}`} role="img" aria-label="Volume diário de documentos">
           <defs>
-            <linearGradient id="gradient" x1="0" y1="0" x2="0" y2="1">
+            <linearGradient id="gradiente-volume" x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" stopColor="#4f46e5" stopOpacity="0.15" />
-              <stop offset="100%" stopColor="#4f46e5" stopOpacity="0" />
+              <stop offset="100%" stopColor="#4f46e5" stopOpacity="0.0" />
             </linearGradient>
           </defs>
-          {points.length > 1 && <polygon fill="url(#gradient)" points={area} />}
-          {points.length > 1 && (
-            <polyline fill="none" stroke="#6366f1" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" points={polyline} />
-          )}
-          {points.map((point) => (
-            <circle key={point.data} cx={point.x} cy={point.y} r="3" className="fill-white stroke-indigo-600 stroke-2">
-              <title>{`${rotulo(point.data)}: ${point.total}`}</title>
-            </circle>
-          ))}
+          {xy.length > 1 && <polygon fill="url(#gradiente-volume)" points={`0,${A} ${linha} ${L},${A}`} />}
+          <polyline fill="none" stroke="#6366f1" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" points={linha} />
+          {xy.map(([x, y], i) => <circle key={i} cx={x} cy={y} r="4" className="fill-white stroke-indigo-600 stroke-2">
+            <title>{`${data(pontos[i].data)}: ${pontos[i].total}`}</title>
+          </circle>)}
         </svg>
-        {!volume.length && <p className="absolute inset-0 flex items-center justify-center text-sm text-slate-400">Sem documentos no período.</p>}
-
         <div className="flex justify-between text-[11px] text-slate-400 mt-4 px-1">
-          {labels.map((ponto) => <span key={ponto.data}>{rotulo(ponto.data)}</span>)}
+          {rotulos.map(p => <span key={p.data}>{data(p.data).slice(0, 5)}</span>)}
         </div>
       </div>
     </div>

@@ -1,40 +1,41 @@
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { LayoutDashboard, FileText, ListOrdered, BarChart2, Settings, ChevronRight } from 'lucide-react';
+import {
+  LayoutDashboard, FileText, ListOrdered, BarChart2, Settings, ChevronRight, Users, CalendarClock, Gauge, BellRing,
+  Scissors, Building2,
+} from 'lucide-react';
 import { useAuth } from '../context/useAuth';
 import api from '../services/api';
+import useApi from '../hooks/useApi';
 
-export default function Sidebar({ reviewCount }) {
+export default function Sidebar() {
   const navigate = useNavigate();
   const location = useLocation();
   const { user } = useAuth();
-  const [filaDaApi, setFilaDaApi] = useState(null);
 
+  // contador real da fila de revisão (atualiza a cada 15 s e logo depois de uma revisão)
+  const fila = useApi(() => api.get('/painel').then(r => r.data.fila_revisao), [], { intervalo: 15000 });
+  const { recarregar } = fila;
   useEffect(() => {
-    if (reviewCount !== undefined) return;
-
-    let ativo = true;
-    api.get('/painel')
-      .then(({ data }) => {
-        if (ativo) setFilaDaApi(data.fila_revisao);
-      })
-      .catch(() => {
-        if (ativo) setFilaDaApi(null);
-      });
-
-    return () => { ativo = false; };
-  }, [reviewCount]);
-  const filaRevisao = reviewCount !== undefined ? reviewCount : filaDaApi;
+    window.addEventListener('fila-revisao-mudou', recarregar);
+    return () => window.removeEventListener('fila-revisao-mudou', recarregar);
+  }, [recarregar]);
 
   const menuItems = [
-    { icon: LayoutDashboard, label: 'Visão geral', path: '/' },
+    { icon: LayoutDashboard, label: 'Painel', path: '/' },
     { icon: FileText, label: 'Documentos', path: '/documentos' },
-    { icon: ListOrdered, label: 'Fila de revisão', path: '/fila-revisao', badge: filaRevisao },
+    { icon: ListOrdered, label: 'Fila de revisão', path: '/fila-revisao', badge: fila.dados || null },
+    { icon: Users, label: 'Trabalhadores', path: '/trabalhadores' },
+    { icon: CalendarClock, label: 'Vencimentos', path: '/vencimentos' },
+    { icon: Gauge, label: 'Automação', path: '/automacao' },
+    { icon: BellRing, label: 'Alertas', path: '/alertas' },
+    { icon: Scissors, label: 'Regras de separação', path: '/regras' },
+    { icon: Building2, label: 'Fornecedores', path: '/portal' },
     { icon: BarChart2, label: 'Relatórios', path: '/relatorios' },
   ];
 
   return (
-    <aside className="w-64 bg-white border-r border-slate-100 flex flex-col justify-between h-screen p-5 fixed left-0 top-0 z-20">
+    <aside className="w-64 bg-white border-r border-slate-100 flex flex-col justify-between h-screen p-5 fixed left-0 top-0 z-20 overflow-y-auto">
       <div>
         {/* Logo */}
         <div 
@@ -70,8 +71,8 @@ export default function Sidebar({ reviewCount }) {
                       <Icon className={`w-5 h-5 ${isActive ? 'text-indigo-600' : 'text-slate-500'}`} />
                       <span>{item.label}</span>
                     </div>
-                    {item.badge > 0 && (
-                      <span className="bg-indigo-100 text-indigo-700 text-xs px-2 py-0.5 rounded-full font-semibold">
+                    {item.badge && (
+                      <span aria-label={`${item.badge} documento(s) na fila`} className="bg-indigo-100 text-indigo-700 text-xs px-2 py-0.5 rounded-full font-semibold">
                         {item.badge}
                       </span>
                     )}

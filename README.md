@@ -102,3 +102,20 @@ curl -F arquivo=@lote_teste.pdf http://localhost:8000/lotes
 ├── arquitetura.html      # Apresentação visual e interativa da arquitetura
 └── README.md
 ```
+
+## Recursos de destaque (F0–F9)
+
+| Recurso | Como demonstrar |
+|---|---|
+| F0 Uso de IA visível | `GET /lotes/{id}` → `ia`; Painel → cartão "Uso de IA"; documento → `decidido_por` |
+| F1 Fraude "atenção" vai para a revisão | reenviar o mesmo lote com outro hash → documentos na fila com "atenção de fraude" |
+| F2 Pré-revisão | tela Fila de revisão → "Sugestão da IA" (sem IA, "por regras") |
+| F3 Exigências por função | Trabalhadores → eletricista exige NR-10/NR-35; `PUT /trabalhadores/{id}/funcao` |
+| F4 Regras em português | tela Regras → "mantenha o contrato inteiro junto" |
+| F5 % de acerto | `python scripts/avaliar_acerto.py lote_terceiros.pdf --sem-llm` (também roda no CI) |
+| F6 Alertas de vencimento | tela Alertas (modo simulado); para enviar de verdade: `ALERTAS_MODO=real` + `EVOLUTION_*`/`SMTP_*` no `.env` |
+| F7 Portal do fornecedor | tela Fornecedores → gerar link → `/portal/<token>` |
+| F8 Várias folhas numa imagem | enviar `docs/exemplos/duas_folhas.png` → lote de 2 páginas |
+| F9 Front com dados reais | Painel, Relatórios, Fila, Trabalhadores, Vencimentos, Automação, Alertas, Regras, Fornecedores |
+
+As configurações novas estão em `backend/.env.example`. O roteiro está em `docs/ROTEIRO_DEMO.md`, e as premissas e limitações em `docs/PREMISSAS_LIMITACOES.md`.

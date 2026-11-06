@@ -36,6 +36,7 @@ class LoteOut(BaseModel):
     origem: str = "interno"                      # interno | portal (enviado pelo fornecedor)
     fornecedor: str | None = None                # nome do convite, quando veio do portal
     multidoc: list[dict] | None = None           # páginas que tinham várias folhas e foram recortadas (F8)
+    tem_gabarito: bool = False                   # há gabarito: GET /lotes/{id}/avaliacao responde (F5)
 
     _p = field_validator("prioridade", mode="before")(_prioridade_texto)
 

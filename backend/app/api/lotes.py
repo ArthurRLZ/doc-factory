@@ -60,6 +60,7 @@ def lote_out(db: Session, lote: Lote) -> LoteOut:
     if lote.convite_id:
         convite = db.get(ConviteFornecedor, lote.convite_id)
         out.fornecedor = convite.fornecedor_nome if convite else None
+    out.tem_gabarito = bool(lote.gabarito)
     out.paginas_processadas = feitas
     out.progresso = round(feitas / lote.total_paginas, 3) if lote.total_paginas else 0.0
     return out

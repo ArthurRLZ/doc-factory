@@ -1,31 +1,27 @@
-import { ChevronRight } from 'lucide-react';
+// Documentos por setor no período (GET /relatorios → por_setor).
+import { num, pct } from '../../utils/formatar';
 
-const cores = ['bg-indigo-950', 'bg-indigo-500', 'bg-emerald-500', 'bg-amber-500'];
-const numero = new Intl.NumberFormat('pt-BR');
+const CORES = ['bg-indigo-950', 'bg-indigo-500', 'bg-emerald-500', 'bg-amber-500', 'bg-sky-500', 'bg-rose-400'];
 
-export default function SectorVolume({ sectors = [] }) {
+export default function SectorVolume({ setores = [] }) {
   return (
     <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm flex flex-col justify-between">
-      <div className="flex items-center justify-between mb-4">
-        <div>
-          <h4 className="font-bold text-slate-800 text-sm">Documentos por setor</h4>
-          <p className="text-xs text-slate-400">Volume processado e participação no total</p>
-        </div>
-        <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+      <div className="mb-4">
+        <h4 className="font-bold text-slate-800 text-sm">Documentos por setor</h4>
+        <p className="text-xs text-slate-400">Volume processado e participação no total</p>
       </div>
-
-      <div className="space-y-4">
-        {sectors.map((sector, index) => (
-          <div key={sector.setor} className="flex items-center justify-between gap-4">
-            <span className="w-32 text-xs font-semibold text-slate-600">{sector.setor}</span>
-            <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden">
-              <div style={{ width: `${sector.percentual}%` }} className={`h-full ${cores[index % cores.length]} rounded-full`} />
+      {setores.length === 0 ? <p className="text-xs text-slate-500">Sem documentos no período.</p> :
+        <div className="space-y-4">
+          {setores.map((s, i) => (
+            <div key={s.setor} className="flex items-center justify-between gap-4" title={pct(s.percentual)}>
+              <span className="w-40 text-xs font-semibold text-slate-600">{s.setor}</span>
+              <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden">
+                <div style={{ width: `${s.percentual}%` }} className={`h-full ${CORES[i % CORES.length]} rounded-full`} />
+              </div>
+              <span className="w-12 text-right text-xs font-bold text-slate-800">{num(s.total)}</span>
             </div>
-            <span className="w-12 text-right text-xs font-bold text-slate-800">{numero.format(sector.total)}</span>
-          </div>
-        ))}
-        {!sectors.length && <p className="text-sm text-slate-400">Ainda não há documentos por setor.</p>}
-      </div>
+          ))}
+        </div>}
     </div>
   );
 }
