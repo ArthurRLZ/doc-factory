@@ -13,19 +13,25 @@ from app.config import settings
 from app.llm import obter_llm
 from app.models import Documento, Lote, Pagina, Trabalhador, agora
 from app.pipeline import aprendizado, fraude, identidade, rasterizar
-from app.pipeline.automacao import obter_limiar
 from app.pipeline.anonimizar import indices_sensiveis, mascarar_texto, tarjar_imagem
-from app.pipeline.classificar import (classificar_por_regras, combinar,
-                                      sinais_de_inicio, texto_do_topo)
+from app.pipeline.automacao import obter_limiar
+from app.pipeline.classificar import (
+    classificar_por_regras,
+    combinar,
+    sinais_de_inicio,
+    texto_do_topo,
+)
 from app.pipeline.montar import montar_pdf
 from app.pipeline.ocr import e_pagina_em_branco, ocr_png
 from app.pipeline.resumir import resumir_documento
 from app.pipeline.segmentar import PaginaInfo, segmentar
 from app.storage import get_storage, key_documento, key_pagina
 from app.tipos import DESCONHECIDO, TIPOS_DO_TRABALHADOR
+from app.status import PAGINAS_EM_ABERTO, StatusLote, StatusPagina, StatusRevisao
 
 log = logging.getLogger(__name__)
-STATUS_EM_ABERTO = ("pendente", "processando", "erro")
+
+STATUS_EM_ABERTO = PAGINAS_EM_ABERTO
 
 
 # ---------------------------------------------------------------- etapas 1-3
@@ -81,13 +87,13 @@ def processar_pagina(db: Session, pagina_id: int) -> None:
         # chave identificadora: impressão digital dos CPFs da página (lidos ANTES da máscara; o CPF não é guardado)
         p.sinais = p.sinais | {"cpfs": identidade.impressoes(db, texto or "")}
 
-    p.status, p.erro = "ok", None
+    p.status, p.erro = StatusPagina.OK, None
     db.commit()
 
 
 def _contexto_anterior(db: Session, p: Pagina) -> str | None:
     ant = db.scalar(select(Pagina).where(Pagina.lote_id == p.lote_id, Pagina.numero == p.numero - 1,
-                                         Pagina.status == "ok"))
+                                         Pagina.status == StatusPagina.OK))
     if not ant:
         return None
     if ant.em_branco:
@@ -102,8 +108,8 @@ def finalizar_lote_se_pronto(db: Session, lote_id: str) -> bool:
     if abertas:
         return False
     # "trava" otimista: só UM worker consegue mudar processando → segmentando
-    res = db.execute(update(Lote).where(Lote.id == lote_id, Lote.status == "processando")
-                     .values(status="segmentando", atualizado_em=agora()))
+    res = db.execute(update(Lote).where(Lote.id == lote_id, Lote.status == StatusLote.PROCESSANDO)
+                     .values(status=StatusLote.SEGMENTANDO, atualizado_em=agora()))
     db.commit()
     if res.rowcount != 1:
         return False
@@ -112,17 +118,17 @@ def finalizar_lote_se_pronto(db: Session, lote_id: str) -> bool:
     try:
         segmentar_e_montar(db, lote)
         falhas = db.scalar(select(func.count()).select_from(Pagina).where(
-            Pagina.lote_id == lote_id, Pagina.status == "falhou")) or 0
+            Pagina.lote_id == lote_id, Pagina.status == StatusPagina.FALHOU)) or 0
         if falhas:
-            lote.status = "erro"
+            lote.status = StatusLote.ERRO
             lote.erro = f"{falhas} página(s) não puderam ser processadas. Consulte as páginas e reprocesse o lote."
         else:
-            lote.status, lote.erro = "concluido", None
+            lote.status, lote.erro = StatusLote.CONCLUIDO, None
     except Exception as e:
         log.exception("falha ao segmentar lote %s", lote_id)
         db.rollback()
         lote = db.get(Lote, lote_id)
-        lote.status, lote.erro = "erro", str(e)[:2000]
+        lote.status, lote.erro = StatusLote.ERRO, str(e)[:2000]
     db.commit()
     return True
 
@@ -140,7 +146,7 @@ def segmentar_e_montar(db: Session, lote: Lote) -> None:
     db.flush()
 
     infos = [PaginaInfo(numero=p.numero, tipo=p.tipo or DESCONHECIDO, conf_tipo=p.confianca or 0.0,
-                        em_branco=p.em_branco, falhou=p.status == "falhou", divergente=p.divergente,
+                        em_branco=p.em_branco, falhou=p.status == StatusPagina.FALHOU, divergente=p.divergente,
                         ocr_conf=p.ocr_confianca if p.ocr_confianca is not None else 0.0,
                         inicio_llm=p.inicio_llm, sinais=p.sinais or {})
              for p in lote.paginas]
@@ -150,7 +156,7 @@ def segmentar_e_montar(db: Session, lote: Lote) -> None:
         doc = Documento(lote_id=lote.id, ordem=ordem, tipo=dp.tipo,
                         pagina_inicio=min(dp.paginas), pagina_fim=max(dp.paginas),
                         confianca=dp.confianca, motivos=dp.motivos,
-                        status_revisao="pendente" if dp.revisao else "auto_aprovado")
+                        status_revisao=StatusRevisao.PENDENTE if dp.revisao else StatusRevisao.AUTO_APROVADO)
         db.add(doc)
         db.flush()
         pags = [por_numero[n] for n in dp.paginas]

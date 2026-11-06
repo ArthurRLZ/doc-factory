@@ -6,11 +6,24 @@ ficam no storage (disco/MinIO/S3) e o banco guarda só a chave (key) + hash.
 import uuid
 from datetime import date, datetime, timezone
 
-from sqlalchemy import (DDL, JSON, Boolean, Date, DateTime, Float, ForeignKey, Index,
-                        Integer, String, Text, event)
+from sqlalchemy import (
+    DDL,
+    JSON,
+    Boolean,
+    Date,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    event,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
+from app.status import StatusLote, StatusPagina
 
 
 def agora():
@@ -33,7 +46,7 @@ class Lote(Base):
     tamanho_bytes: Mapped[int] = mapped_column(Integer)
     total_paginas: Mapped[int] = mapped_column(Integer, default=0)
     # recebido → processando → segmentando → concluido | erro
-    status: Mapped[str] = mapped_column(String(20), default="recebido", index=True)
+    status: Mapped[str] = mapped_column(String(20), default=StatusLote.RECEBIDO, index=True)
     erro: Mapped[str | None] = mapped_column(Text)
     # 1 baixa · 2 normal · 3 alta — o worker atende primeiro os lotes de prioridade maior
     prioridade: Mapped[int] = mapped_column(Integer, default=2, server_default="2", index=True)
@@ -58,7 +71,7 @@ class Pagina(Base):
     documento_id: Mapped[str | None] = mapped_column(ForeignKey("documentos.id", ondelete="SET NULL"), index=True)
 
     # pendente → processando → ok | erro (retenta) → falhou (desistiu)
-    status: Mapped[str] = mapped_column(String(20), default="pendente", index=True)
+    status: Mapped[str] = mapped_column(String(20), default=StatusPagina.PENDENTE, index=True)
     tentativas: Mapped[int] = mapped_column(Integer, default=0)
     erro: Mapped[str | None] = mapped_column(Text)
 

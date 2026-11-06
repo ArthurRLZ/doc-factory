@@ -17,8 +17,10 @@ from app.db import get_db
 from app.models import Documento, Lote, Trabalhador
 from app.pipeline import checklist, validade
 from app.tipos import PRIORIDADE_NOME, setor_do_tipo
+from app.status import StatusLote, StatusRevisao
 
 router = APIRouter(tags=["telas (painel e relatórios)"])
+
 _DIAS_SEMANA = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"]
 
 
@@ -56,13 +58,65 @@ def _status_validade(docs: list[Documento]) -> Counter:
     return Counter(validade.status(d.validade_data, d.tipo)[0] for d in docs)
 
 
+def _volume_7_dias(criados: list[tuple[Documento, date]], hoje: date) -> tuple[list, list, list[dict]]:
+    semana = [dia for _, dia in criados if hoje - timedelta(days=6) <= dia <= hoje]
+    semana_ant = [dia for _, dia in criados if hoje - timedelta(days=13) <= dia <= hoje - timedelta(days=7)]
+    volume = _contagem_por_dia(semana, hoje - timedelta(days=6), 7)
+    for v in volume:
+        dia = date.fromisoformat(v["data"])
+        v["rotulo"] = "Hoje" if dia == hoje else _DIAS_SEMANA[dia.weekday()]
+    return semana, semana_ant, volume
+
+
+def _setores(docs: list[Documento]) -> str:
+    return " e ".join(sorted({setor_do_tipo(d.tipo) for d in docs}))
+
+
+def _itens_de_atencao(vencidos, vencem_hoje, vencem_semana, pendentes, suspeitos, irregulares,
+                      processados_hoje) -> list[dict]:
+    """Lista "Precisa de atenção" da visão geral, do mais grave ao informativo."""
+    itens = []
+    if vencidos:
+        itens.append({"tipo": "vencidos", "gravidade": "alta", "total": len(vencidos),
+                      "titulo": f"{len(vencidos)} documento(s) vencido(s)", "subtitulo": _setores(vencidos),
+                      "acao": "Ver", "rota": "/vencimentos?ate_dias=0"})
+    if vencem_semana:
+        itens.append({"tipo": "vencem_semana", "gravidade": "alta" if vencem_hoje else "media",
+                      "total": len(vencem_semana),
+                      "titulo": (f"{len(vencem_hoje)} documento(s) vencem hoje" if vencem_hoje
+                                 else f"{len(vencem_semana)} documento(s) vencem esta semana"),
+                      "subtitulo": _setores(vencem_semana), "acao": "Ver",
+                      "rota": "/vencimentos?ate_dias=7&incluir_vencidos=false"})
+    if pendentes:
+        altas = sum(1 for d in pendentes if d.prioridade == 3)
+        itens.append({"tipo": "revisao", "gravidade": "media", "total": len(pendentes),
+                      "titulo": "Revisões pendentes", "subtitulo": f"{altas} documento(s) de alta prioridade",
+                      "acao": "Revisar", "rota": "/revisao/fila"})
+    if suspeitos:
+        altos = sum(1 for d in suspeitos if d.risco == "alto_risco")
+        itens.append({"tipo": "fraude", "gravidade": "alta" if altos else "media", "total": len(suspeitos),
+                      "titulo": f"{len(suspeitos)} documento(s) com sinal de adulteração",
+                      "subtitulo": f"{altos} de alto risco" if altos else "verifique as evidências",
+                      "acao": "Ver", "rota": "/documentos?risco=alto_risco" if altos else "/documentos?risco=atencao"})
+    if irregulares:
+        itens.append({"tipo": "trabalhadores_irregulares", "gravidade": "alta", "total": len(irregulares),
+                      "titulo": f"{len(irregulares)} trabalhador(es) com documentação irregular",
+                      "subtitulo": "documento exigido faltando ou vencido", "acao": "Ver",
+                      "rota": "/trabalhadores?situacao=irregular"})
+    itens.append({"tipo": "processados_hoje", "gravidade": "ok", "total": len(processados_hoje),
+                  "titulo": f"{len(processados_hoje)} processado(s) hoje",
+                  "subtitulo": "Todos os documentos classificados" if not pendentes
+                  else f"{len(pendentes)} aguardando revisão", "acao": "Abrir", "rota": "/documentos"})
+    return itens
+
+
 @router.get("/painel")
 def painel(db: Session = Depends(get_db), _u: UsuarioAtual = Depends(analista)):
     """Tela "Visão geral": cartões, volume de 7 dias, itens de atenção, recentes e distribuição por setor."""
     hoje = _hoje()
     docs = list(db.scalars(select(Documento)))
     criados = [(d, _local(d.criado_em).date()) for d in docs]
-    pendentes = [d for d in docs if d.status_revisao == "pendente"]
+    pendentes = [d for d in docs if d.status_revisao == StatusRevisao.PENDENTE]
     st = {d.id: validade.status(d.validade_data, d.tipo) for d in docs}
 
     vencidos = [d for d in docs if st[d.id][0] == "vencido"]
@@ -70,53 +124,14 @@ def painel(db: Session = Depends(get_db), _u: UsuarioAtual = Depends(analista)):
     vencem_semana = [d for d in docs if st[d.id][1] is not None and 0 <= st[d.id][1] <= 7]
     processados_hoje = [d for d, dia in criados if dia == hoje]
     este_mes = [d for d, dia in criados if (dia.year, dia.month) == (hoje.year, hoje.month)]
-    auto = sum(1 for d in docs if d.status_revisao == "auto_aprovado")
+    auto = sum(1 for d in docs if d.status_revisao == StatusRevisao.AUTO_APROVADO)
 
-    semana = [dia for _, dia in criados if hoje - timedelta(days=6) <= dia <= hoje]
-    semana_ant = [dia for _, dia in criados if hoje - timedelta(days=13) <= dia <= hoje - timedelta(days=7)]
-    volume = _contagem_por_dia(semana, hoje - timedelta(days=6), 7)
-    for v in volume:
-        dia = date.fromisoformat(v["data"])
-        v["rotulo"] = "Hoje" if dia == hoje else _DIAS_SEMANA[dia.weekday()]
-
-    def setores(lista):
-        return sorted({setor_do_tipo(d.tipo) for d in lista})
-
-    atencao = []
-    if vencidos:
-        atencao.append({"tipo": "vencidos", "gravidade": "alta", "total": len(vencidos),
-                        "titulo": f"{len(vencidos)} documento(s) vencido(s)", "subtitulo": " e ".join(setores(vencidos)),
-                        "acao": "Ver", "rota": "/vencimentos?ate_dias=0"})
-    if vencem_semana:
-        atencao.append({"tipo": "vencem_semana", "gravidade": "alta" if vencem_hoje else "media",
-                        "total": len(vencem_semana),
-                        "titulo": (f"{len(vencem_hoje)} documento(s) vencem hoje" if vencem_hoje
-                                   else f"{len(vencem_semana)} documento(s) vencem esta semana"),
-                        "subtitulo": " e ".join(setores(vencem_semana)), "acao": "Ver",
-                        "rota": "/vencimentos?ate_dias=7&incluir_vencidos=false"})
-    if pendentes:
-        altas = sum(1 for d in pendentes if d.prioridade == 3)
-        atencao.append({"tipo": "revisao", "gravidade": "media", "total": len(pendentes),
-                        "titulo": "Revisões pendentes", "subtitulo": f"{altas} documento(s) de alta prioridade",
-                        "acao": "Revisar", "rota": "/revisao/fila"})
+    semana, semana_ant, volume = _volume_7_dias(criados, hoje)
     suspeitos = [d for d in docs if d.risco in ("atencao", "alto_risco")]
-    if suspeitos:
-        altos = sum(1 for d in suspeitos if d.risco == "alto_risco")
-        atencao.append({"tipo": "fraude", "gravidade": "alta" if altos else "media", "total": len(suspeitos),
-                        "titulo": f"{len(suspeitos)} documento(s) com sinal de adulteração",
-                        "subtitulo": f"{altos} de alto risco" if altos else "verifique as evidências",
-                        "acao": "Ver", "rota": "/documentos?risco=alto_risco" if altos else "/documentos?risco=atencao"})
     irregulares = [t for t in db.scalars(select(Trabalhador))
                    if t.documentos and checklist.avaliar(t)["situacao"] == "irregular"]
-    if irregulares:
-        atencao.append({"tipo": "trabalhadores_irregulares", "gravidade": "alta", "total": len(irregulares),
-                        "titulo": f"{len(irregulares)} trabalhador(es) com documentação irregular",
-                        "subtitulo": "documento exigido faltando ou vencido", "acao": "Ver",
-                        "rota": "/trabalhadores?situacao=irregular"})
-    atencao.append({"tipo": "processados_hoje", "gravidade": "ok", "total": len(processados_hoje),
-                    "titulo": f"{len(processados_hoje)} processado(s) hoje",
-                    "subtitulo": "Todos os documentos classificados" if not pendentes
-                    else f"{len(pendentes)} aguardando revisão", "acao": "Abrir", "rota": "/documentos"})
+    atencao = _itens_de_atencao(vencidos, vencem_hoje, vencem_semana, pendentes, suspeitos, irregulares,
+                                processados_hoje)
 
     por_setor = Counter(setor_do_tipo(d.tipo) for d in docs)
     recentes = sorted(docs, key=lambda d: d.criado_em or datetime.min, reverse=True)[:5]
@@ -151,14 +166,14 @@ def relatorios(dias: int = 30, db: Session = Depends(get_db), _u: UsuarioAtual =
     periodo = [d for d, dia in todos if inicio <= dia <= hoje]
     anterior = [d for d, dia in todos if inicio_ant <= dia < inicio]
 
-    auto = sum(1 for d in periodo if d.status_revisao == "auto_aprovado")
-    auto_ant = sum(1 for d in anterior if d.status_revisao == "auto_aprovado")
+    auto = sum(1 for d in periodo if d.status_revisao == StatusRevisao.AUTO_APROVADO)
+    auto_ant = sum(1 for d in anterior if d.status_revisao == StatusRevisao.AUTO_APROVADO)
     revisao = len(periodo) - auto
 
     # tempo de análise: do upload à conclusão do lote, dividido pelos documentos do lote
     tempos = []
     for lote, n in db.execute(select(Lote, func.count(Documento.id)).join(Documento, Documento.lote_id == Lote.id)
-                              .where(Lote.status == "concluido").group_by(Lote.id)).all():
+                              .where(Lote.status == StatusLote.CONCLUIDO).group_by(Lote.id)).all():
         if n and lote.criado_em and lote.atualizado_em and inicio <= _local(lote.criado_em).date() <= hoje:
             tempos.append((_local(lote.atualizado_em) - _local(lote.criado_em)).total_seconds() / n)
     tempo_medio = round(sum(tempos) / len(tempos), 1) if tempos else None

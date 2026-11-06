@@ -1,8 +1,8 @@
 """Upload e acompanhamento de lotes."""
 import hashlib
-import logging
 import io
 import json
+import logging
 import os
 import tempfile
 import zipfile
@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from app import util
 from app.api.deps import UsuarioAtual, admin, analista, revisor
+from app.api.documentos import doc_out
 from app.config import settings
 from app.db import get_db
 from app.models import Lote, Pagina, Revisao, Trabalhador, novo_id
@@ -22,9 +23,10 @@ from app.pipeline.rasterizar import contar_paginas
 from app.schemas import DocumentoOut, LoteOut, PaginaOut
 from app.storage import get_storage, key_original
 from app.tipos import PRIORIDADES
-from app.api.documentos import doc_out
+from app.status import StatusLote, StatusPagina
 
 router = APIRouter(prefix="/lotes", tags=["lotes"])
+
 log = logging.getLogger(__name__)
 
 # assinatura (primeiros bytes, em hexadecimal) de cada formato aceito: a extensão sozinha não prova nada
@@ -52,11 +54,38 @@ MIMES = {".pdf": "application/pdf", ".tif": "image/tiff", ".tiff": "image/tiff",
 
 def lote_out(db: Session, lote: Lote) -> LoteOut:
     feitas = db.scalar(select(func.count()).select_from(Pagina)
-                       .where(Pagina.lote_id == lote.id, Pagina.status.in_(("ok", "falhou")))) or 0
+                       .where(Pagina.lote_id == lote.id, Pagina.status.in_((StatusPagina.OK, StatusPagina.FALHOU)))) or 0
     out = LoteOut.model_validate(lote)
     out.paginas_processadas = feitas
     out.progresso = round(feitas / lote.total_paginas, 3) if lote.total_paginas else 0.0
     return out
+
+
+async def _receber_arquivo(arquivo: UploadFile, destino: str) -> tuple[str, int]:
+    """Grava o upload em blocos de 1 MB (nunca carrega um lote de 1 GB na memória). Retorna (sha256, tamanho)."""
+    sha, tamanho, limite = hashlib.sha256(), 0, settings.MAX_UPLOAD_MB * 1024 * 1024
+    with open(destino, "wb") as f:
+        while bloco := await arquivo.read(1024 * 1024):
+            tamanho += len(bloco)
+            if tamanho > limite:
+                raise HTTPException(413, f"Arquivo maior que {settings.MAX_UPLOAD_MB} MB")
+            sha.update(bloco)
+            f.write(bloco)
+    return sha.hexdigest(), tamanho
+
+
+def _validar_arquivo(caminho: str, ext: str) -> int:
+    """Confere o conteúdo (não só a extensão) e conta as páginas. Retorna o nº de páginas."""
+    if not conteudo_confere(caminho, ext):
+        raise HTTPException(415, f"O conteúdo do arquivo não é um {ext.lstrip('.').upper()} de verdade")
+    try:
+        n = contar_paginas(caminho)
+    except Exception as e:
+        log.info("arquivo rejeitado: %s", e)
+        raise HTTPException(422, "Não consegui abrir o arquivo (corrompido ou protegido por senha)") from e
+    if n == 0:
+        raise HTTPException(422, "Arquivo sem páginas")
+    return n
 
 
 @router.post("", response_model=LoteOut, status_code=201)
@@ -70,34 +99,15 @@ async def criar_lote(arquivo: UploadFile = File(...), nome: str | None = Form(No
     if ext not in settings.extensoes:
         raise HTTPException(415, f"Extensão {ext or '(nenhuma)'} não suportada. Use: {settings.EXTENSOES_PERMITIDAS}")
 
-    # streaming em blocos de 1 MB: nunca carrega um lote de 1 GB inteiro na memória
-    sha, tamanho, limite = hashlib.sha256(), 0, settings.MAX_UPLOAD_MB * 1024 * 1024
     fd, tmp = tempfile.mkstemp(suffix=ext)
+    os.close(fd)
     try:
-        with os.fdopen(fd, "wb") as f:
-            while bloco := await arquivo.read(1024 * 1024):
-                tamanho += len(bloco)
-                if tamanho > limite:
-                    raise HTTPException(413, f"Arquivo maior que {settings.MAX_UPLOAD_MB} MB")
-                sha.update(bloco)
-                f.write(bloco)
-        digest = sha.hexdigest()
-
+        digest, tamanho = await _receber_arquivo(arquivo, tmp)
         existente = db.scalar(select(Lote).where(Lote.hash_sha256 == digest))
         if existente:
             raise HTTPException(409, {"mensagem": "Este arquivo já foi enviado", "lote_id": existente.id})
-
-        if not conteudo_confere(tmp, ext):
-            raise HTTPException(415, f"O conteúdo do arquivo não é um {ext.lstrip('.').upper()} de verdade")
-        try:
-            n = contar_paginas(tmp)
-        except Exception as e:
-            log.info("arquivo rejeitado: %s", e)
-            raise HTTPException(422, "Não consegui abrir o arquivo (corrompido ou protegido por senha)") from e
-        if n == 0:
-            raise HTTPException(422, "Arquivo sem páginas")
+        n = _validar_arquivo(tmp, ext)
         alertas_arquivo = fraude.analisar_pdf(tmp)        # metadados do PDF (editor, modificação)
-
         lote_id = novo_id()
         key = key_original(lote_id, ext)
         get_storage().put_file(key, tmp)
@@ -107,7 +117,7 @@ async def criar_lote(arquivo: UploadFile = File(...), nome: str | None = Form(No
 
     lote = Lote(id=lote_id, nome=nome or arquivo.filename or "lote", arquivo_key=key, hash_sha256=digest,
                 mime=MIMES.get(ext, "application/octet-stream"), tamanho_bytes=tamanho,
-                total_paginas=n, status="processando", prioridade=PRIORIDADES[prioridade],
+                total_paginas=n, status=StatusLote.PROCESSANDO, prioridade=PRIORIDADES[prioridade],
                 enviado_por=u.login, alertas=alertas_arquivo)
     db.add(lote)
     db.add_all(Pagina(lote_id=lote_id, numero=i) for i in range(n))   # fila de trabalho = as páginas
@@ -155,9 +165,9 @@ def reprocessar(lote_id: str, tudo: bool = False, db: Session = Depends(get_db),
         raise HTTPException(409, "O lote possui revisões e não pode ser reprocessado sem perder o histórico.")
     cond = [Pagina.lote_id == lote_id]
     if not tudo:
-        cond.append(Pagina.status.in_(("erro", "falhou")))
-    db.execute(update(Pagina).where(*cond).values(status="pendente", tentativas=0, erro=None))
-    lote.status, lote.erro = "processando", None
+        cond.append(Pagina.status.in_((StatusPagina.ERRO, StatusPagina.FALHOU)))
+    db.execute(update(Pagina).where(*cond).values(status=StatusPagina.PENDENTE, tentativas=0, erro=None))
+    lote.status, lote.erro = StatusLote.PROCESSANDO, None
     db.commit()
     return lote_out(db, lote)
 
@@ -167,7 +177,7 @@ def apagar_lote(lote_id: str, db: Session = Depends(get_db), u: UsuarioAtual = D
     """LGPD (direito de eliminação): apaga o lote, as páginas, os documentos, os arquivos no storage e as
     pessoas que ficarem sem nenhum documento. Fica só um registro de auditoria SEM dados pessoais."""
     lote = _obter(db, lote_id)
-    if lote.status in ("processando", "segmentando"):
+    if lote.status in (StatusLote.PROCESSANDO, StatusLote.SEGMENTANDO):
         raise HTTPException(409, "Lote em processamento; aguarde terminar para apagar")
     resumo = {"nome": lote.nome, "paginas": lote.total_paginas, "documentos": len(lote.documentos)}
     caminho = get_storage().caminho_local(lote.arquivo_key) if settings.STORAGE_BACKEND == "local" else None
@@ -193,7 +203,7 @@ def baixar_zip(lote_id: str, anonimizado: bool = True, db: Session = Depends(get
     if not anonimizado and u.autenticado and u.perfil == "analista":
         raise HTTPException(403, "O PDF original (com dados pessoais) exige perfil revisor ou superior")
     lote = _obter(db, lote_id)
-    if lote.status != "concluido":
+    if lote.status != StatusLote.CONCLUIDO:
         raise HTTPException(409, f"Lote ainda não concluído (status: {lote.status})")
     st, buf, manifesto = get_storage(), io.BytesIO(), []
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:

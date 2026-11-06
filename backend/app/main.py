@@ -20,8 +20,10 @@ from app.db import SessionLocal, init_db
 from app.llm import erro_configuracao, obter_llm
 from app.models import Documento, Lote, Pagina
 from app.tipos import PRIORIDADE_NOME
+from app.status import StatusRevisao
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+
 log = logging.getLogger("api")
 
 
@@ -149,6 +151,6 @@ def metricas(_u: UsuarioAtual = Depends(analista)):
             "documentos_por_prioridade": por_prioridade,
             "resumos_por_origem": dict(db.execute(select(Documento.resumo_origem, func.count())
                                                   .group_by(Documento.resumo_origem)).all()),
-            "taxa_automacao": round(por_status.get("auto_aprovado", 0) / total_docs, 3) if total_docs else None,
+            "taxa_automacao": round(por_status.get(StatusRevisao.AUTO_APROVADO, 0) / total_docs, 3) if total_docs else None,
             "confianca_media": db.scalar(select(func.avg(Documento.confianca))),
         }

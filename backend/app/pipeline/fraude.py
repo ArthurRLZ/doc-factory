@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 from app import util
 from app.models import Documento, Lote, Pagina
 from app.pipeline.classificar import normalizar
+from app.status import StatusRevisao
 
 EDITORES = ("photoshop", "gimp", "illustrator", "inkscape", "canva", "ilovepdf", "smallpdf", "sejda",
             "pdfescape", "pdf-xchange editor", "pdfelement", "paint.net", "affinity", "corel")
@@ -106,5 +107,5 @@ def aplicar(db: Session, lote: Lote, doc: Documento, paginas: list[Pagina]) -> N
     if doc.risco == "alto_risco":
         motivos = [f"possível fraude: {a['mensagem']}" for a in doc.alertas if a["gravidade"] == "alta"]
         doc.motivos = list(dict.fromkeys((doc.motivos or []) + motivos))
-        if doc.status_revisao == "auto_aprovado":
-            doc.status_revisao = "pendente"
+        if doc.status_revisao == StatusRevisao.AUTO_APROVADO:
+            doc.status_revisao = StatusRevisao.PENDENTE
