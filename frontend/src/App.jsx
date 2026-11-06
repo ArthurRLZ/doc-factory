@@ -2,6 +2,7 @@ import { BrowserRouter as Router, Navigate, Outlet, Route, Routes } from 'react-
 import AuthPage from './pages/Auth/AuthPage';
 import Home from './pages/Home/Home';
 import Documents from './pages/Documents/Documents';
+import ReviewQueue from './pages/ReviewQueue/ReviewQueue';
 import Reports from './pages/Reports/Reports';
 import { AuthProvider } from './context/AuthContext';
 import { useAuth } from './context/useAuth';
@@ -26,6 +27,7 @@ export default function App() {
           <Route element={<RequireAuth />}>
             <Route path="/" element={<Home />} />
             <Route path="/documentos" element={<Documents />} />
+            <Route path="/fila-revisao" element={<ReviewQueue />} />
             <Route path="/relatorios" element={<Reports />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />

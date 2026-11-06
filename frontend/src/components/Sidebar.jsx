@@ -1,16 +1,35 @@
+import { useEffect, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { LayoutDashboard, FileText, ListOrdered, BarChart2, Settings, ChevronRight } from 'lucide-react';
 import { useAuth } from '../context/useAuth';
+import api from '../services/api';
 
-export default function Sidebar() {
+export default function Sidebar({ reviewCount }) {
   const navigate = useNavigate();
   const location = useLocation();
   const { user } = useAuth();
+  const [filaDaApi, setFilaDaApi] = useState(null);
+
+  useEffect(() => {
+    if (reviewCount !== undefined) return;
+
+    let ativo = true;
+    api.get('/painel')
+      .then(({ data }) => {
+        if (ativo) setFilaDaApi(data.fila_revisao);
+      })
+      .catch(() => {
+        if (ativo) setFilaDaApi(null);
+      });
+
+    return () => { ativo = false; };
+  }, [reviewCount]);
+  const filaRevisao = reviewCount !== undefined ? reviewCount : filaDaApi;
 
   const menuItems = [
     { icon: LayoutDashboard, label: 'Visão geral', path: '/' },
     { icon: FileText, label: 'Documentos', path: '/documentos' },
-    { icon: ListOrdered, label: 'Fila de revisão', path: '/fila-revisao', badge: 5 },
+    { icon: ListOrdered, label: 'Fila de revisão', path: '/fila-revisao', badge: filaRevisao },
     { icon: BarChart2, label: 'Relatórios', path: '/relatorios' },
   ];
 
@@ -51,7 +70,7 @@ export default function Sidebar() {
                       <Icon className={`w-5 h-5 ${isActive ? 'text-indigo-600' : 'text-slate-500'}`} />
                       <span>{item.label}</span>
                     </div>
-                    {item.badge && (
+                    {item.badge > 0 && (
                       <span className="bg-indigo-100 text-indigo-700 text-xs px-2 py-0.5 rounded-full font-semibold">
                         {item.badge}
                       </span>
