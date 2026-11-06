@@ -118,6 +118,7 @@ class Documento(Base):
     prioridade: Mapped[int] = mapped_column(Integer, default=2, server_default="2", index=True)
     prioridade_motivo: Mapped[str | None] = mapped_column(String(300))
     titulo: Mapped[str | None] = mapped_column(String(200))           # título lido no documento (p/ a tela)
+    trabalhador_id: Mapped[int | None] = mapped_column(ForeignKey("trabalhadores.id", ondelete="SET NULL"), index=True)
 
     # validade / vigência (o status — vigente, vencendo, vencido — é calculado na leitura, com a data de hoje)
     validade_data: Mapped[date | None] = mapped_column(Date, index=True)
@@ -128,6 +129,23 @@ class Documento(Base):
 
     lote: Mapped[Lote] = relationship(back_populates="documentos")
     revisoes: Mapped[list["Revisao"]] = relationship(back_populates="documento", cascade="all, delete-orphan")
+    trabalhador: Mapped["Trabalhador | None"] = relationship(back_populates="documentos")
+
+
+class Trabalhador(Base):
+    """Pessoa a quem os documentos pertencem — identificada pela impressão digital do CPF (nunca o CPF)."""
+    __tablename__ = "trabalhadores"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    cpf_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    cpf_mascarado: Mapped[str] = mapped_column(String(20))           # ***.982.247-**
+    criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=agora)
+
+    documentos: Mapped[list[Documento]] = relationship(back_populates="trabalhador")
+
+    @property
+    def rotulo(self) -> str:
+        return f"Trabalhador {self.cpf_mascarado}"
 
 
 # Busca full-text em português com índice GIN (só no PostgreSQL; no SQLite cai para LIKE)

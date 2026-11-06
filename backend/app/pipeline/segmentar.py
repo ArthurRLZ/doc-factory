@@ -8,8 +8,9 @@ Para cada página, combina sinais em ordem de força:
   2. "Página 1 de 3"            → início certo
   3. título no topo (+ modelo)     → início provável
   4. modelo diz que é início       → início possível
-  5. tipo mudou (ambos confiáveis) → início fraco
-  6. página em branco           → separador (fecha o documento)
+  5. CPF de outra pessoa          → início provável (chave identificadora)
+  6. tipo mudou (ambos confiáveis) → início fraco
+  7. página em branco           → separador (fecha o documento)
 Cada decisão gera uma confiança de corte; a confiança do documento é a menor
 entre (tipo, cortes, qualidade do OCR).
 """
@@ -63,6 +64,11 @@ def _decidir(p: PaginaInfo, atual: DocProposto | None, forcar_novo: bool) -> tup
         return True, 0.9, None
     if titulo and p.inicio_llm is False:
         return True, 0.6, f"pág. {p.numero + 1}: título no topo, mas modelo diz continuação"
+    # chave identificadora: a página traz o CPF de OUTRA pessoa (impressões sem nenhuma em comum)
+    cpfs_pag = {c["h"] for c in s.get("cpfs", [])}
+    cpfs_doc = {c["h"] for i in atual._infos for c in (i.sinais or {}).get("cpfs", [])}
+    if cpfs_pag and cpfs_doc and not (cpfs_pag & cpfs_doc):
+        return True, 0.8, None
     if p.inicio_llm:
         return True, 0.75, None
     tipo_atual = _tipo_votado(atual._infos)[0]

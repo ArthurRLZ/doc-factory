@@ -11,11 +11,11 @@ from app.api.deps import UsuarioAtual, analista, revisor
 from app.db import E_POSTGRES, get_db
 from app.models import Documento, Pagina, Revisao
 from app.pipeline import validade
-from app.pipeline.orquestrador import gerar_arquivos
+from app.pipeline.orquestrador import atribuir_trabalhador, gerar_arquivos
 from app.pipeline.resumir import nome_prioridade, resumir_documento
 from app.config import settings
 from app.schemas import (BuscaItem, DocumentoOut, PaginaDocumentos, Prioridade, RevisaoIn, RevisaoOut,
-                         ValidadeOut)
+                         TrabalhadorRef, ValidadeOut)
 from app.storage import get_storage
 from app.tipos import PRIORIDADES, SETORES, TIPOS, TIPOS_COM_VALIDADE, nome_tipo, setor_do_tipo
 
@@ -31,6 +31,9 @@ def doc_out(d: Documento) -> DocumentoOut:
     st, dias = validade.status(d.validade_data, d.tipo)
     o.validade = ValidadeOut(data=d.validade_data, inicio=d.validade_inicio, status=st, dias_restantes=dias,
                              origem=d.validade_origem, evidencia=d.validade_evidencia)
+    if d.trabalhador:
+        o.trabalhador = TrabalhadorRef(id=d.trabalhador.id, rotulo=f"Trabalhador {d.trabalhador.cpf_mascarado}",
+                                       cpf_mascarado=d.trabalhador.cpf_mascarado)
     return o
 
 
@@ -223,6 +226,8 @@ def revisar(doc_id: str, r: RevisaoIn, db: Session = Depends(get_db), u: Usuario
         d.status_revisao = "revisado"
         gerar_arquivos(lote, d, [p for p in pags if p.numero < r.pagina_corte])
         gerar_arquivos(lote, novo, [p for p in pags if p.numero >= r.pagina_corte])
+        atribuir_trabalhador(db, d, [p for p in pags if p.numero < r.pagina_corte])
+        atribuir_trabalhador(db, novo, [p for p in pags if p.numero >= r.pagina_corte])
         resumir_documento(lote, d)
         resumir_documento(lote, novo)
         afetados.append(novo)
@@ -241,6 +246,7 @@ def revisar(doc_id: str, r: RevisaoIn, db: Session = Depends(get_db), u: Usuario
                    .values(ordem=Documento.ordem - 1))
         d.status_revisao = "revisado"
         gerar_arquivos(lote, d, _paginas(db, d.id))
+        atribuir_trabalhador(db, d, _paginas(db, d.id))
         resumir_documento(lote, d)
 
     db.add(Revisao(documento_id=d.id, lote_id=lote.id, usuario=usuario, acao=r.acao,

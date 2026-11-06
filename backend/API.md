@@ -121,3 +121,19 @@ Outros: `GET /lotes` (lista) · `GET /lotes/{id}/documentos` · `GET /lotes/{id}
 
 A acurácia é **medida** pelas revisões humanas (aprovado sem mudança = acerto; tipo trocado, dividido ou
 juntado = erro). Sem revisões suficientes ela vem `null` — o sistema não inventa número.
+
+## Dossiê do trabalhador e checklist (tela sugerida: "Trabalhadores")
+
+O trabalhador é identificado pela **impressão digital do CPF** — o CPF não é guardado; para exibir use
+`cpf_mascarado` (`***.982.247-**`). Cada documento traz `trabalhador: {id, rotulo, cpf_mascarado}` ou `null`
+(documentos da empresa, como certidões, não têm trabalhador).
+
+- `GET /trabalhadores?lote_id=&situacao=` → `{total, irregulares, exigidos, itens: [{id, rotulo, cpf_mascarado,
+  documentos, situacao (regular | atencao | irregular), pendencias, faltando: [tipos], vencidos, vencendo}]}`
+  (irregulares primeiro).
+- `GET /trabalhadores/{id}/dossie` → o resumo acima + `checklist: [{tipo, tipo_nome, status (ok | faltando |
+  vencido | vencendo | indeterminado), documento_id, validade, observacao}]` + `outros_alertas` (ex.: certificado
+  de NR vencendo) + `duplicados` + `itens` (documentos da pessoa).
+- `/painel` traz `trabalhadores_irregulares` e um item em `atencao` com `tipo: "trabalhadores_irregulares"`.
+
+Documentos exigidos: `DOCUMENTOS_EXIGIDOS_TRABALHADOR` em `backend/app/tipos.py` (identidade, CTPS, ASO, ficha de EPI).

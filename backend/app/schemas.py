@@ -61,6 +61,13 @@ class ValidadeOut(BaseModel):
     evidencia: str | None = None             # trecho do documento que comprova a data
 
 
+class TrabalhadorRef(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    rotulo: str
+    cpf_mascarado: str
+
+
 class DocumentoOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: str
@@ -72,6 +79,7 @@ class DocumentoOut(BaseModel):
     setor: str = ""
     titulo: str | None = None
     validade: ValidadeOut = Field(default_factory=ValidadeOut)
+    trabalhador: TrabalhadorRef | None = None    # dono do documento (pela impressão digital do CPF)
     criado_em: datetime | None = None
     pagina_inicio: int
     pagina_fim: int
