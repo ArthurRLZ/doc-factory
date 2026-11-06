@@ -104,7 +104,13 @@ def finalizar_lote_se_pronto(db: Session, lote_id: str) -> bool:
     lote = db.get(Lote, lote_id)
     try:
         segmentar_e_montar(db, lote)
-        lote.status, lote.erro = "concluido", None
+        falhas = db.scalar(select(func.count()).select_from(Pagina).where(
+            Pagina.lote_id == lote_id, Pagina.status == "falhou")) or 0
+        if falhas:
+            lote.status = "erro"
+            lote.erro = f"{falhas} página(s) não puderam ser processadas. Consulte as páginas e reprocesse o lote."
+        else:
+            lote.status, lote.erro = "concluido", None
     except Exception as e:
         log.exception("falha ao segmentar lote %s", lote_id)
         db.rollback()
