@@ -6,13 +6,13 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
-from sqlalchemy import and_, func, literal_column, or_, select, update
+from sqlalchemy import String, and_, func, literal, literal_column, or_, select, update
 from sqlalchemy.orm import Session
 
 from app import util
 from app.api.deps import UsuarioAtual, analista, revisor
 from app.config import settings
-from app.db import E_POSTGRES, get_db
+from app.db import E_POSTGRES, get_db, tem_unaccent
 from app.models import Documento, Pagina, Revisao
 from app.pipeline import aprendizado, fraude, validade
 from app.pipeline.orquestrador import atribuir_trabalhador, gerar_arquivos
@@ -330,12 +330,19 @@ def buscar(q: str, tipo: str | None = None, db: Session = Depends(get_db), _u: U
     if len(q.strip()) < 2:
         raise HTTPException(422, "Busca muito curta")
     if E_POSTGRES:
+        # palavra inteira pelo radical ("contrato" acha "contratada") OU pedaço de palavra ("certid"),
+        # e sem diferenciar acento ("certidao" acha "certidão") quando a extensão unaccent existe
         cfg = literal_column("'portuguese'")
-        tsq = func.plainto_tsquery(cfg, q)
-        vetor = func.to_tsvector(cfg, func.coalesce(Documento.texto, ""))
-        trecho = func.ts_headline(cfg, Documento.texto, tsq,
+        def sem_acento(x):
+            return func.unaccent(x) if tem_unaccent() else x
+        texto = func.coalesce(Documento.texto, "")
+        termo = literal(q.strip(), String)
+        tsq = func.plainto_tsquery(cfg, sem_acento(termo))
+        vetor = func.to_tsvector(cfg, sem_acento(texto))
+        pedaco = func.lower(sem_acento(texto)).contains(func.lower(sem_acento(termo)))
+        trecho = func.ts_headline(cfg, Documento.texto, func.plainto_tsquery(cfg, termo),
                                   "StartSel=«,StopSel=»,MaxWords=25,MinWords=10")
-        stmt = (select(Documento, trecho).where(vetor.op("@@")(tsq))
+        stmt = (select(Documento, trecho).where(or_(vetor.op("@@")(tsq), pedaco))
                 .order_by(func.ts_rank(vetor, tsq).desc()))
     else:  # SQLite (dev): LIKE simples
         trecho = func.substr(Documento.texto, func.max(1, func.instr(func.lower(Documento.texto), q.lower()) - 60), 160)

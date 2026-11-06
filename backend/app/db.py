@@ -46,6 +46,28 @@ def init_db():
     from app import models  # noqa: F401  (registra as tabelas)
     Base.metadata.create_all(engine)
     migrar_colunas()
+    if E_POSTGRES:
+        _ativar_unaccent()
+
+
+_UNACCENT = {"ok": False}
+
+
+def _ativar_unaccent() -> None:
+    """Busca sem acento no PostgreSQL ("certidao" acha "certidão"). Sem permissão para criar a
+    extensão, a busca continua funcionando, só que diferenciando acento."""
+    from sqlalchemy import text
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("CREATE EXTENSION IF NOT EXISTS unaccent"))
+        _UNACCENT["ok"] = True
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning("extensão unaccent indisponível (%s): busca vai diferenciar acento", e)
+
+
+def tem_unaccent() -> bool:
+    return _UNACCENT["ok"]
 
 
 def migrar_colunas() -> list[str]:

@@ -27,7 +27,7 @@ jobs:
       - name: Dependências
         run: pip install -r requirements.txt ruff
       - name: Lint (erros reais, não estilo)
-        run: ruff check app tests --select E9,F63,F7,F82,F401,B904
+        run: ruff check app tests --select E9,F63,F7,F82,F401,F811,B904
       - name: Testes
         env:
           LLM_PROVIDER: nenhum

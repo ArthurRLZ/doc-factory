@@ -17,16 +17,13 @@ from app.api.deps import UsuarioAtual, admin, analista, revisor
 from app.api.documentos import doc_out
 from app.config import settings
 from app.db import get_db
-from app.models import Lote, Pagina, Revisao, VersaoLote, novo_id
-from app.pipeline import fraude
-from app.models import Lote, Pagina, Revisao, Trabalhador, novo_id
-from app.models import Trabalhador
-from app.pipeline import rasterizar
+from app.models import Lote, Pagina, Revisao, Trabalhador, VersaoLote, novo_id
+from app.pipeline import fraude, rasterizar
 from app.pipeline.rasterizar import contar_paginas
 from app.schemas import DocumentoOut, LoteOut, PaginaOut
+from app.status import StatusLote, StatusPagina
 from app.storage import get_storage, key_original
 from app.tipos import PRIORIDADES
-from app.status import StatusLote, StatusPagina
 
 router = APIRouter(prefix="/lotes", tags=["lotes"])
 
