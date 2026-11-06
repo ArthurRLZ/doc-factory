@@ -18,6 +18,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
     event,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -270,6 +271,35 @@ class RegraSeparacao(Base):
     ativa: Mapped[bool] = mapped_column(Boolean, default=True)
     criada_por: Mapped[str | None] = mapped_column(String(100))
     criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=agora)
+
+
+class ContatoAlerta(Base):
+    """Quem recebe o resumo de vencimentos (pessoa da empresa, nunca o trabalhador)."""
+    __tablename__ = "contatos_alerta"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    nome: Mapped[str] = mapped_column(String(120))
+    canal: Mapped[str] = mapped_column(String(20))                    # email | whatsapp
+    destino: Mapped[str] = mapped_column(String(200))                 # e-mail, ou telefone E.164 só dígitos
+    ativo: Mapped[bool] = mapped_column(Boolean, default=True)
+    criado_por: Mapped[str | None] = mapped_column(String(100))
+    criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=agora)
+
+
+class AlertaEnviado(Base):
+    """Um aviso por (documento, contato, canal, faixa): rodar o job várias vezes não repete a mensagem."""
+    __tablename__ = "alertas_enviados"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    documento_id: Mapped[str] = mapped_column(ForeignKey("documentos.id", ondelete="CASCADE"), index=True)
+    contato_id: Mapped[int] = mapped_column(ForeignKey("contatos_alerta.id", ondelete="CASCADE"), index=True)
+    canal: Mapped[str] = mapped_column(String(20))
+    faixa: Mapped[str] = mapped_column(String(10))                    # 30 | 15 | 7 | 1 | vencido
+    status: Mapped[str] = mapped_column(String(20))                   # enviado | simulado | falhou
+    erro: Mapped[str | None] = mapped_column(Text)
+    enviado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=agora)
+
+    __table_args__ = (UniqueConstraint("documento_id", "contato_id", "canal", "faixa", name="uq_alerta_unico"),)
 
 
 class Usuario(Base):

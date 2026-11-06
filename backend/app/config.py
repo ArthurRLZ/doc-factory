@@ -65,7 +65,23 @@ class Settings(BaseSettings):
     FRAUDE_ATENCAO_REVISAO: bool = True
     FUNCAO_EXIGENCIAS_ATIVO: bool = True
     PRE_REVISAO_ATIVA: bool = True          # documento pendente ganha explicação + sugestão antes do revisor abrir
-    PRE_REVISAO_MAX_POR_LOTE: int = 50      # teto de chamadas de IA de pré-revisão por lote (o resto: por regras)    # a função lida no ASO/CTPS acrescenta as NRs exigidas ao checklist     # documento com risco "atencao" também vai para a fila de revisão
+    PRE_REVISAO_MAX_POR_LOTE: int = 50      # teto de chamadas de IA de pré-revisão por lote (o resto: por regras)
+
+    # --- Alertas de vencimento (F6): o agendador é o laço do worker --------------------------
+    ALERTAS_ATIVO: bool = False             # liga o envio automático (1x por dia) dentro do worker
+    ALERTAS_MODO: str = "simulado"          # simulado (só registra e loga) | real (envia de verdade)
+    ALERTAS_FAIXAS_DIAS: str = "30,15,7,1"  # avisa ao entrar em cada faixa de dias antes do vencimento
+    ALERTAS_HORA_EXECUCAO: int = 8          # hora local (FUSO_HORAS) a partir da qual roda no dia
+    ALERTAS_URL_PUBLICA: str = "http://localhost:5173"   # base dos links nas mensagens
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 587
+    SMTP_USUARIO: str = ""
+    SMTP_SENHA: str = ""                    # nunca aparece em log nem em resposta da API
+    SMTP_REMETENTE: str = ""
+    SMTP_TLS: bool = True
+    EVOLUTION_URL: str = ""                 # WhatsApp via Evolution API, ex.: http://localhost:8080
+    EVOLUTION_INSTANCIA: str = ""           # instância já conectada ao WhatsApp
+    EVOLUTION_APIKEY: str = ""              # nunca aparece em log nem em resposta da API    # a função lida no ASO/CTPS acrescenta as NRs exigidas ao checklist     # documento com risco "atencao" também vai para a fila de revisão
 
     # --- Validade -----------------------------------------------------------
     VALIDADE_ALERTA_DIAS: int = 30      # vence em até N dias → status "vencendo" (e prioridade alta)
@@ -80,6 +96,19 @@ class Settings(BaseSettings):
     WORKER_POLL_S: float = 1.0
     WORKER_STALE_MIN: int = 2           # página "processando" há mais que isso = worker morreu
     WORKER_INLINE: bool = False         # True = roda o worker numa thread dentro da API (dev/demo)
+
+    @property
+    def alertas_faixas(self) -> list[int]:
+        """"30,15,7,1" → [1, 7, 15, 30] (ordenada, sem repetição, ignora o que não for número positivo)."""
+        faixas = set()
+        for x in self.ALERTAS_FAIXAS_DIAS.split(","):
+            try:
+                n = int(x.strip())
+            except ValueError:
+                continue
+            if n > 0:
+                faixas.add(n)
+        return sorted(faixas)
 
     @property
     def extensoes(self) -> set[str]:
