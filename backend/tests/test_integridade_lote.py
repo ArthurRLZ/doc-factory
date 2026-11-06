@@ -2,7 +2,7 @@
 import uuid
 
 from app.db import SessionLocal
-from app.models import Documento, Lote, Pagina, Revisao
+from app.models import Documento, Lote, Pagina
 from app.pipeline import orquestrador
 from app.storage import get_storage
 
