@@ -135,8 +135,13 @@ def painel(db: Session = Depends(get_db), _u: UsuarioAtual = Depends(analista)):
 
     por_setor = Counter(setor_do_tipo(d.tipo) for d in docs)
     recentes = sorted(docs, key=lambda d: d.criado_em or datetime.min, reverse=True)[:5]
+    ia = db.execute(select(
+        func.coalesce(func.sum(Lote.llm_chamadas_classificacao + Lote.llm_chamadas_resumo + Lote.llm_chamadas_outras), 0),
+        func.coalesce(func.sum(Lote.llm_paginas), 0), func.coalesce(func.sum(Lote.total_paginas), 0))).one()
     return {
         "hoje": hoje.isoformat(),
+        "ia": {"chamadas_total": int(ia[0]), "paginas_com_ia": int(ia[1]), "paginas_total": int(ia[2]),
+               "percentual_paginas_com_ia": _pct(int(ia[1]), int(ia[2]))},
         "cartoes": {
             "documentos_ativos": {"valor": len(docs), "este_mes": len(este_mes)},
             "vencem_semana": {"valor": len(vencem_semana), "vencem_hoje": len(vencem_hoje), "vencidos": len(vencidos)},

@@ -14,7 +14,7 @@ from app.api.deps import UsuarioAtual, analista, revisor
 from app.config import settings
 from app.db import E_POSTGRES, get_db, tem_unaccent
 from app.models import Documento, Pagina, Revisao
-from app.pipeline import aprendizado, fraude, validade
+from app.pipeline import aprendizado, explicabilidade, fraude, validade
 from app.pipeline.orquestrador import atribuir_trabalhador, gerar_arquivos
 from app.pipeline.resumir import nome_prioridade, resumir_documento
 from app.schemas import (
@@ -49,6 +49,7 @@ def doc_out(d: Documento) -> DocumentoOut:
     o.setor = setor_do_tipo(d.tipo)
     o.codigo = f"DOC-{(d.criado_em or datetime.now()).year}-{d.id[:6].upper()}"
     o.n_paginas = d.pagina_fim - d.pagina_inicio + 1
+    o.origem_texto = explicabilidade.origem_texto(d.decidido_por)
     st, dias = validade.status(d.validade_data, d.tipo)
     o.validade = ValidadeOut(data=d.validade_data, inicio=d.validade_inicio, status=st, dias_restantes=dias,
                              origem=d.validade_origem, evidencia=d.validade_evidencia)
@@ -313,6 +314,9 @@ def revisar(doc_id: str, r: RevisaoIn, db: Session = Depends(get_db), u: Usuario
     usuario = u.login if u.autenticado else (r.usuario or "anonimo")
     antes = _snapshot(d)
     res = _ACOES[r.acao](db, d, r, usuario)
+    if r.acao in ("alterar_tipo", "dividir", "juntar_proximo"):   # aprovar confirma a decisão que já havia
+        for x in res.afetados:
+            x.decidido_por = "humano"
     if res.conteudo_mudou:
         db.flush()
         for x in res.afetados:             # conteúdo ou datas mudaram: sinais de fraude de novo

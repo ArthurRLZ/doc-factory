@@ -13,8 +13,10 @@ foi enviado como "alta", a do lote.
 import logging
 import re
 
+from sqlalchemy.orm import object_session
+
 from app.config import settings
-from app.llm import obter_llm
+from app.llm import contador, obter_llm
 from app.models import Documento, Lote
 from app.pipeline import validade
 from app.pipeline.classificar import _TITULOS, normalizar
@@ -111,6 +113,9 @@ def resumir_documento(lote: Lote, doc: Documento) -> None:
         llm = obter_llm()
         if llm and (doc.texto or "").strip():
             resp = llm.resumir(nome_tipo(doc.tipo), campos_do_tipo(doc.tipo), doc.texto)
+            db = object_session(lote)
+            if db is not None:
+                contador.registrar(db, lote.id, "resumo")
 
     status_v, dias = _aplicar_validade(doc, resp.validade if resp else None)
     manual = doc.prioridade_manual          # prioridade definida pelo revisor não é sobrescrita

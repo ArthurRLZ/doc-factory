@@ -31,6 +31,7 @@ class LoteOut(BaseModel):
     enviado_por: str | None = None
     erro: str | None = None
     criado_em: datetime
+    ia: dict | None = None        # uso de IA na última execução (Lote.ia)
 
     _p = field_validator("prioridade", mode="before")(_prioridade_texto)
 
@@ -95,6 +96,9 @@ class DocumentoOut(BaseModel):
     resumo: str | None = None
     resumo_origem: str | None = None
     campos: dict | None = None
+    decidido_por: str | None = None               # regra | ia | combinado | humano
+    origem_texto: str | None = None               # o mesmo, em português para a tela
+    ia_justificativa: str | None = None
 
     _p = field_validator("prioridade", mode="before")(_prioridade_texto)
 

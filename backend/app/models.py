@@ -55,10 +55,28 @@ class Lote(Base):
     criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=agora)
     atualizado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=agora, onupdate=agora)
 
+    # uso de IA na ÚLTIMA execução (incremento atômico em app/llm/contador.py; reprocessar zera)
+    llm_chamadas_classificacao: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    llm_chamadas_resumo: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    llm_chamadas_outras: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    llm_paginas: Mapped[int] = mapped_column(Integer, default=0, server_default="0")   # páginas que consultaram a IA
+
     paginas: Mapped[list["Pagina"]] = relationship(back_populates="lote", cascade="all, delete-orphan",
                                                    order_by="Pagina.numero")
     documentos: Mapped[list["Documento"]] = relationship(back_populates="lote", cascade="all, delete-orphan",
                                                          order_by="Documento.ordem")
+
+    @property
+    def ia(self) -> dict:
+        """Quanto este lote dependeu da IA ("só 3 de 14 páginas usaram IA")."""
+        from app.config import settings
+        cl, rs, ou = (self.llm_chamadas_classificacao or 0), (self.llm_chamadas_resumo or 0), (self.llm_chamadas_outras or 0)
+        total = cl + rs + ou
+        pags = self.llm_paginas or 0
+        return {"chamadas_total": total, "chamadas_classificacao": cl, "chamadas_resumo": rs, "chamadas_outras": ou,
+                "paginas_com_ia": pags, "paginas_total": self.total_paginas or 0,
+                "percentual_paginas_com_ia": round(100 * pags / max(self.total_paginas or 0, 1), 1),
+                "custo_estimado_brl": round(total * settings.LLM_CUSTO_POR_CHAMADA_BRL, 4)}
 
 
 class VersaoLote(Base):
@@ -109,6 +127,7 @@ class Pagina(Base):
     confianca: Mapped[float | None] = mapped_column(Float)
     divergente: Mapped[bool] = mapped_column(Boolean, default=False)
     sinais: Mapped[dict | None] = mapped_column(JSON)                # pagina_x, pagina_n, titulo_topo...
+    llm_chamado: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")   # IA consultada p/ classificar
 
     atualizado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=agora, onupdate=agora)
 
@@ -155,6 +174,9 @@ class Documento(Base):
     validade_inicio: Mapped[date | None] = mapped_column(Date)
     validade_origem: Mapped[str | None] = mapped_column(String(20))   # texto | modelo | regra
     validade_evidencia: Mapped[str | None] = mapped_column(String(500))
+    # quem decidiu o tipo: regra | ia | combinado | humano (app/pipeline/explicabilidade.py)
+    decidido_por: Mapped[str | None] = mapped_column(String(12))
+    ia_justificativa: Mapped[str | None] = mapped_column(String(500))
     criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=agora)
 
     lote: Mapped[Lote] = relationship(back_populates="documentos")

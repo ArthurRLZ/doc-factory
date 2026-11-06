@@ -17,6 +17,7 @@ from app.api.deps import UsuarioAtual, admin, analista, revisor
 from app.api.documentos import doc_out
 from app.config import settings
 from app.db import get_db
+from app.llm import contador
 from app.models import Lote, Pagina, Revisao, Trabalhador, VersaoLote, novo_id
 from app.pipeline import fraude, privacidade, rasterizar
 from app.pipeline.rasterizar import contar_paginas
@@ -182,6 +183,8 @@ def reprocessar(lote_id: str, tudo: bool = False, db: Session = Depends(get_db),
             "revisoes": [retrato(r) for r in db.scalars(select(Revisao).where(Revisao.lote_id == lote_id))],
         })
         db.add(versao)
+    numeros = list(db.scalars(select(Pagina.numero).where(*cond)))
+    contador.zerar(db, lote_id, numeros)          # o contador de IA reflete só a última execução
     db.execute(update(Pagina).where(*cond).values(status=StatusPagina.PENDENTE, tentativas=0, erro=None))
     lote.status, lote.erro = StatusLote.PROCESSANDO, None
     db.commit()

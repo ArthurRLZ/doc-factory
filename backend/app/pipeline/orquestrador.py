@@ -10,9 +10,10 @@ from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.llm import obter_llm
+from app.llm import contador, obter_llm
 from app.models import Documento, Lote, Pagina, Trabalhador, VersaoLote, agora
 from app.pipeline import aprendizado, fraude, identidade, rasterizar
+from app.pipeline.explicabilidade import decidido_por
 from app.pipeline.anonimizar import indices_sensiveis, mascarar_texto, tarjar_imagem
 from app.pipeline.automacao import obter_limiar
 from app.pipeline.classificar import (
@@ -79,6 +80,7 @@ def processar_pagina(db: Session, pagina_id: int) -> None:
         if llm and (settings.LLM_SEMPRE or regra.confianca < settings.LIMIAR_LLM):
             imagem_segura = tarjar_imagem(r.png, palavras, indices_sensiveis(palavras), r.dpi)
             resp = llm.classificar(p.texto, imagem_segura, _contexto_anterior(db, p), aprendizado.exemplos(db))
+            contador.registrar(db, p.lote_id, "classificacao", p.id)
             if resp:
                 p.tipo_llm, p.conf_llm, p.inicio_llm = resp.tipo, resp.confianca, resp.inicio_documento
                 p.sinais = p.sinais | {"llm_justificativa": resp.justificativa}
@@ -169,6 +171,7 @@ def segmentar_e_montar(db: Session, lote: Lote) -> None:
             gerar_arquivos(lote, doc, pags)
             atribuir_trabalhador(db, doc, pags)
             resumir_documento(lote, doc)
+            doc.decidido_por, doc.ia_justificativa = decidido_por(pags, doc.tipo)
             db.flush()
             fraude.aplicar(db, lote, doc, pags)
         db.commit()
