@@ -15,7 +15,7 @@ cp .env.example .env                                    # WORKER_INLINE=true →
 uvicorn app.main:app --reload                           # http://localhost:8000/docs
 python scripts/gerar_lote_teste.py lote_teste.pdf       # lote falso de 11 páginas / 6 documentos
 curl -F arquivo=@lote_teste.pdf http://localhost:8000/lotes
-pytest -q                                               # 23 testes, inclui ponta a ponta
+pytest -q                                               # 31 testes, inclui ponta a ponta
 ```
 
 ## Rodar a stack completa
@@ -43,7 +43,7 @@ app/
   pipeline/
     rasterizar.py      1. PyMuPDF → PNG 300 dpi por página (ou texto nativo se o PDF for digital)
     ocr.py             2. Tesseract image_to_data → texto + caixa + confiança por palavra
-    anonimizar.py         CPF/CNPJ/RG/e-mail/telefone → texto, imagem e PDF
+    anonimizar.py         CPF/CNPJ/RG/e-mail/telefone + nomes + endereço/CEP → texto, imagem e PDF
     classificar.py     3. regras (palavras + título no topo) + modelo → tipo + confiança
     segmentar.py       4. sinais de início/fim → documentos (função pura, testável)
     montar.py          5. PyMuPDF → PDF pesquisável (texto invisível) + PDF com redaction real
@@ -145,7 +145,10 @@ O documento vai para a fila de revisão se:
 
 - A taxonomia e os limiares estão calibrados num lote sintético. Recalibrem com os dados de teste
   e meçam acurácia de corte e de tipo.
-- A anonimização é feita por regex. Próximo passo: Presidio + spaCy pt para nomes e endereços.
+- Nomes são detectados por rótulos do documento ("Nome:", "Cliente:", "filho de"...) + reconhecedor
+  spaCy (`pt_core_news_md`); endereços por padrão de logradouro + número. Pode falhar com nomes fora
+  de rótulos em textos muito curtos ou com OCR ruim. Próximo passo: medir com os dados reais e,
+  se preciso, um modelo de entidades maior (`pt_core_news_lg`) ou o Presidio.
 - Pré-processamento mínimo. Próximo passo: deskew e binarização adaptativa para scans ruins.
 - Login com perfis já existe (JWT). Próximo passo: SSO/OAuth2 da organização e expiração com refresh token.
 - Resumo e prioridade pelo modelo foram testados com respostas simuladas; validar com o provedor escolhido.

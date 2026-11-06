@@ -34,8 +34,13 @@ class Settings(BaseSettings):
     OCR_TIMEOUT_S: int = 90             # página que trava o Tesseract vira 'erro' e é retentada
     TEXTO_NATIVO_MIN_CHARS: int = 50    # PDF digital com texto → pula OCR
 
+    # --- Anonimização ------------------------------------------------------
+    ANONIMIZAR_NOMES: bool = True       # nomes de pessoas → [NOME] (rótulos do documento + reconhecedor spaCy)
+    ANONIMIZAR_ENDERECOS: bool = True   # logradouro + número → [ENDERECO], CEP → [CEP] (cidades ficam)
+    NER_MODELO: str = "pt_core_news_md" # modelo spaCy em português; ausente = só as regras por rótulo
+
     # --- Classificação / revisão ----------------------------------------
-    LIMIAR_REVISAO: float = 0.80        # abaixo disso → fila de revisão humana
+    LIMIAR_REVISAO: float = 0.80       # abaixo disso → fila de revisão humana
     LIMIAR_LLM: float = 0.75            # regra abaixo disso → consulta o modelo
     LLM_SEMPRE: bool = False            # True = modelo em toda página (2ª opinião)
     BRANCO_COMO_SEPARADOR: bool = True  # página em branco fecha o documento atual
