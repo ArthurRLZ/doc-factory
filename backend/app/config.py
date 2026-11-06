@@ -53,6 +53,9 @@ class Settings(BaseSettings):
     LLM_MULTIMODAL: bool = True         # envia a imagem (mascarada) junto do texto
     LLM_TIMEOUT: int = 60
 
+    # --- Validade -----------------------------------------------------------
+    VALIDADE_ALERTA_DIAS: int = 30      # vence em até N dias → status "vencendo" (e prioridade alta)
+
     # --- Resumo -------------------------------------------------------------
     RESUMO_ATIVO: bool = True           # gera resumo de cada documento (modelo, ou simples sem modelo)
     RESUMO_CHARS_POR_PARTE: int = 6000  # documento maior que isso é resumido em partes e depois consolidado

@@ -1,4 +1,6 @@
-"""Documentos, fila de revisão humana, auditoria, resumo e busca."""
+"""Documentos, fila de revisão humana, auditoria, resumo, vencimentos e busca."""
+from datetime import date, datetime, timedelta
+
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 from sqlalchemy import func, literal_column, select, update
@@ -7,11 +9,12 @@ from sqlalchemy.orm import Session
 from app.api.deps import UsuarioAtual, analista, revisor
 from app.db import E_POSTGRES, get_db
 from app.models import Documento, Pagina, Revisao
+from app.pipeline import validade
 from app.pipeline.orquestrador import gerar_arquivos
 from app.pipeline.resumir import nome_prioridade, resumir_documento
-from app.schemas import BuscaItem, DocumentoOut, Prioridade, RevisaoIn, RevisaoOut
+from app.schemas import BuscaItem, DocumentoOut, Prioridade, RevisaoIn, RevisaoOut, ValidadeOut
 from app.storage import get_storage
-from app.tipos import PRIORIDADES, TIPOS, nome_tipo
+from app.tipos import PRIORIDADES, TIPOS, nome_tipo, setor_do_tipo
 
 router = APIRouter(tags=["documentos"])
 
@@ -19,7 +22,12 @@ router = APIRouter(tags=["documentos"])
 def doc_out(d: Documento) -> DocumentoOut:
     o = DocumentoOut.model_validate(d)
     o.tipo_nome = nome_tipo(d.tipo)
+    o.setor = setor_do_tipo(d.tipo)
+    o.codigo = f"DOC-{(d.criado_em or datetime.now()).year}-{d.id[:6].upper()}"
     o.n_paginas = d.pagina_fim - d.pagina_inicio + 1
+    st, dias = validade.status(d.validade_data, d.tipo)
+    o.validade = ValidadeOut(data=d.validade_data, inicio=d.validade_inicio, status=st, dias_restantes=dias,
+                             origem=d.validade_origem, evidencia=d.validade_evidencia)
     return o
 
 
@@ -63,6 +71,20 @@ def listar_documentos(tipo: str | None = None, status_revisao: str | None = None
         q = q.where(Documento.lote_id == lote_id)
     q = q.order_by(Documento.criado_em.desc(), Documento.ordem).offset(max(0, deslocamento)).limit(min(max(1, limite), 500))
     return [doc_out(d) for d in db.scalars(q)]
+
+
+@router.get("/vencimentos", response_model=list[DocumentoOut])
+def vencimentos(ate_dias: int = 30, incluir_vencidos: bool = True, lote_id: str | None = None,
+                db: Session = Depends(get_db), _u: UsuarioAtual = Depends(analista)):
+    """Documentos que vencem nos próximos `ate_dias` dias (e os já vencidos), do mais urgente ao menos."""
+    hoje = date.today()
+    q = select(Documento).where(Documento.validade_data.is_not(None),
+                                Documento.validade_data <= hoje + timedelta(days=max(0, ate_dias)))
+    if not incluir_vencidos:
+        q = q.where(Documento.validade_data >= hoje)
+    if lote_id:
+        q = q.where(Documento.lote_id == lote_id)
+    return [doc_out(d) for d in db.scalars(q.order_by(Documento.validade_data).limit(500))]
 
 
 @router.get("/documentos/{doc_id}", response_model=DocumentoOut)

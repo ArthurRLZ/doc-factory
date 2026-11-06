@@ -44,10 +44,17 @@ Responda SOMENTE com JSON válido, sem texto fora dele:
 {{"resumo": "<2 a 3 frases objetivas>",
   "campos": {{{campos}}},
   "prioridade": "alta" | "media" | "baixa",
-  "motivo_prioridade": "<até 15 palavras>"}}
+  "motivo_prioridade": "<até 15 palavras>",
+  "validade": {{"data": "dd/mm/aaaa" | null, "inicio": "dd/mm/aaaa" | null,
+               "evidencia": "<trecho COPIADO LITERALMENTE do texto que comprova a data>"}}}}
 
 Prioridade "alta" = exige ação rápida (prazo vencendo, valor alto, pendência, inconsistência);
-"baixa" = só arquivar; "media" = o resto."""
+"baixa" = só arquivar; "media" = o resto.
+
+Validade = até quando o DOCUMENTO vale: "válida até", "validade", vigência de contrato, prazo de certificado.
+Se vier como prazo ("vigência de 12 meses a partir de 05/11/2026"), calcule a data final.
+NÃO é validade: vencimento de pagamento de guia, boleto ou fatura. Sem validade no texto: "data": null.
+A evidência deve ser um trecho que existe no texto, palavra por palavra — ele será conferido."""
 
 PROMPT_PARTE = """Você recebe UMA PARTE de um documento longo em português (texto de OCR, dados pessoais
 mascarados). Resuma esta parte em até 6 frases, preservando nomes de empresas, valores, datas,
@@ -149,10 +156,11 @@ class ClienteOpenAICompat:
         brutos = dados.get("campos") if isinstance(dados.get("campos"), dict) else {}
         campos_ok = {c: (None if brutos.get(c) in (None, "", "null") else str(brutos.get(c))[:300]) for c in campos}
         prioridade = str(dados.get("prioridade") or "").lower().replace("é", "e")
+        validade = dados.get("validade") if isinstance(dados.get("validade"), dict) else None
         return RespostaResumo(resumo=resumo[:2000], campos=campos_ok,
                               prioridade=prioridade if prioridade in PRIORIDADES else None,
                               motivo_prioridade=str(dados.get("motivo_prioridade") or "")[:200],
-                              partes=n_partes)
+                              partes=n_partes, validade=validade)
 
     # ------------------------------------------------------------ classificação
     def classificar(self, texto, imagem_png, contexto_anterior):

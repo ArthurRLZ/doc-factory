@@ -18,6 +18,7 @@ class RespostaResumo:
     prioridade: str | None = None          # alta | media | baixa (sugestão do modelo)
     motivo_prioridade: str = ""
     partes: int = 1                        # em quantas partes o documento foi resumido
+    validade: dict | None = None           # {"data", "inicio", "evidencia"} — conferido em pipeline/validade.py
 
 
 class ClassificadorLLM(Protocol):

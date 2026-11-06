@@ -35,3 +35,17 @@ def processado(lote_pdf):
         lote = r.json()
         worker.rodar(uma_vez=True)
         yield c, lote
+
+
+@pytest.fixture(scope="session")
+def lote_terceiros(processado):
+    """Lote de gestão de terceiros (14 páginas, datas relativas a hoje), processado uma vez só."""
+    from app import worker
+    c, _ = processado
+    caminho = os.path.join(TMP, "terceiros.pdf")
+    subprocess.run([sys.executable, os.path.join(BASE, "scripts", "gerar_lote_bernhoeft.py"), caminho], check=True)
+    with open(caminho, "rb") as f:
+        r = c.post("/lotes", files={"arquivo": ("terceiros.pdf", f, "application/pdf")})
+    assert r.status_code == 201, r.text
+    worker.rodar(uma_vez=True)
+    return c, r.json()

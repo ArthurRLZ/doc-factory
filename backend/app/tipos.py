@@ -181,6 +181,23 @@ TIPOS: dict[str, dict] = {
 # documentos que todo trabalhador terceirizado precisa ter (checklist do dossiê) — configurável
 DOCUMENTOS_EXIGIDOS_TRABALHADOR = ["IDENTIDADE", "CTPS", "ASO", "FICHA_EPI"]
 
+# setor responsável (a tela agrupa por setor)
+SETORES: dict[str, str] = {
+    "IDENTIDADE": "Recursos Humanos", "COMPROVANTE_RESIDENCIA": "Recursos Humanos", "CERTIDAO": "Recursos Humanos",
+    "CTPS": "Recursos Humanos", "CONTRACHEQUE": "Recursos Humanos",
+    "ASO": "Segurança do Trabalho", "FICHA_EPI": "Segurança do Trabalho", "CERTIFICADO_NR": "Segurança do Trabalho",
+    "CONTRATO": "Jurídico",
+    "NOTA_FISCAL": "Financeiro", "GUIA_FGTS": "Financeiro",
+    "CND_FEDERAL": "Regularidade fiscal", "CRF_FGTS": "Regularidade fiscal", "CNDT": "Regularidade fiscal",
+}
+SETOR_DESCONHECIDO = "Não classificado"
+
+# tipos em que faz sentido controlar validade/vigência (data escrita no texto, modelo ou regra).
+# Nos demais, datas como "vencimento" são prazo de pagamento, não validade do documento.
+TIPOS_COM_VALIDADE = {"IDENTIDADE", "CONTRATO", "ASO", "CERTIFICADO_NR", "CND_FEDERAL", "CRF_FGTS", "CNDT"}
+# tipos em que a validade é OBRIGATÓRIA: se não for identificada, o documento vai para revisão
+TIPOS_VALIDADE_OBRIGATORIA = {"ASO", "CERTIFICADO_NR", "CND_FEDERAL", "CRF_FGTS", "CNDT"}
+
 # prioridade: guardada como número no banco (ordena fácil), exibida como texto na API
 PRIORIDADES = {"baixa": 1, "media": 2, "alta": 3}
 PRIORIDADE_NOME = {v: k for k, v in PRIORIDADES.items()}
@@ -203,6 +220,10 @@ def campos_do_tipo(codigo: str | None) -> list[str]:
     if not codigo or codigo not in TIPOS:
         return []
     return list(TIPOS[codigo].get("campos", []))
+
+
+def setor_do_tipo(codigo: str | None) -> str:
+    return SETORES.get(codigo or "", SETOR_DESCONHECIDO)
 
 
 def regra_validade(codigo: str | None) -> dict | None:

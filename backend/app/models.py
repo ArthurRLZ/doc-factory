@@ -4,9 +4,9 @@ Regra de ouro: o banco guarda METADADOS. Imagens, PDFs e caixas de palavras
 ficam no storage (disco/MinIO/S3) e o banco guarda só a chave (key) + hash.
 """
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
-from sqlalchemy import (DDL, JSON, Boolean, DateTime, Float, ForeignKey, Index,
+from sqlalchemy import (DDL, JSON, Boolean, Date, DateTime, Float, ForeignKey, Index,
                         Integer, String, Text, event)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -117,6 +117,13 @@ class Documento(Base):
     # prioridade na fila de revisão: 1 baixa · 2 média · 3 alta
     prioridade: Mapped[int] = mapped_column(Integer, default=2, server_default="2", index=True)
     prioridade_motivo: Mapped[str | None] = mapped_column(String(300))
+    titulo: Mapped[str | None] = mapped_column(String(200))           # título lido no documento (p/ a tela)
+
+    # validade / vigência (o status — vigente, vencendo, vencido — é calculado na leitura, com a data de hoje)
+    validade_data: Mapped[date | None] = mapped_column(Date, index=True)
+    validade_inicio: Mapped[date | None] = mapped_column(Date)
+    validade_origem: Mapped[str | None] = mapped_column(String(20))   # texto | modelo | regra
+    validade_evidencia: Mapped[str | None] = mapped_column(String(500))
     criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=agora)
 
     lote: Mapped[Lote] = relationship(back_populates="documentos")
